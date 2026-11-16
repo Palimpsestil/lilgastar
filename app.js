@@ -88,18 +88,73 @@ const DEFAULTS = { goal: 30, newN: 10, grad: 2, sound: true, autoSay: true, acce
 const SETUP0 = { mode: 'e2c', cards: CARDS.map(c => c.no), levels: [3, 4, 5], filter: 'all', count: 20, order: 'random',
   mockN: 10, mockSrc: 'mix', mockTimed: true };
 function fresh() { return { app: 'gsat1800', v: 1, w: {}, days: {}, modes: {}, fav: {}, set: { ...DEFAULTS }, setup: { ...SETUP0, cards: SETUP0.cards.slice() }, sess: null, since: dkey() }; }
+const HEADS = new Set(W.map(w => w.w));
+const TYPE_KEYS = ['e2c', 'c2e', 'cloze', 'past', 'listen', 'coll', 'spell'];
+const MODE_KEYS = ['e2c', 'c2e', 'cloze', 'mix', 'past', 'mock', 'cards', 'coll', 'spell', 'listen'];
+const FILTER_KEYS = ['all', 'new', 'learning', 'due', 'wrong', 'fav', 'ans', 'recent'];
+const isObj = x => !!x && typeof x === 'object' && !Array.isArray(x);
+const num = (v, d = 0) => { v = +v; return Number.isFinite(v) ? v : d; };
+function cleanSess(x) {
+  // 未完成的練習：逐欄檢查，任何一題不合格就整個丟掉
+  if (!isObj(x) || !Array.isArray(x.qs) || !x.qs.length || x.qs.length > 400) return null;
+  const qs = [];
+  for (const q of x.qs) {
+    if (!isObj(q) || !TYPE_KEYS.includes(q.t) || !W[q.wi]) return null;
+    const c = { t: q.t, wi: +q.wi };
+    if (q.retry) c.retry = 1;
+    if (q.t === 'past') { if (!PAST[q.pid]) return null; c.pid = +q.pid; }
+    if (q.t === 'cloze' && !ORIG.has(c.wi)) return null;
+    if (q.t === 'coll' || q.t === 'spell') {
+      if (!Array.isArray(q.acc) || !q.acc.length) return null;
+      c.acc = q.acc.map(String); c.h = Math.max(1, num(q.h, 1));
+      if (q.t === 'coll') { if (typeof q.k !== 'string' || !/\{[^}]+\}/.test(q.k)) return null; c.k = q.k; }
+    } else {
+      if (!Array.isArray(q.opts) || q.opts.length !== 4) return null;
+      c.opts = q.opts.map(o => ({ t: String(o && o.t), wi: W[o && o.wi] ? +o.wi : -1, ok: o && o.ok ? 1 : 0 }));
+      if (c.opts.filter(o => o.ok).length !== 1) return null;
+    }
+    qs.push(c);
+  }
+  const i = Math.max(0, Math.min(qs.length, Math.floor(num(x.i))));
+  let a = null;
+  if (isObj(x.a)) a = { ok: !!x.a.ok, ...(x.a.j != null ? { j: num(x.a.j, -1) } : {}), ...(x.a.v != null ? { v: String(x.a.v) } : {}) };
+  return { title: String(x.title || '練習').slice(0, 40), mode: MODE_KEYS.concat('word').includes(x.mode) ? x.mode : 'mix', qs, i,
+    n: Math.max(0, num(x.n)), c: Math.max(0, num(x.c)), wrong: (Array.isArray(x.wrong) ? x.wrong : []).map(Number).filter(k => W[k]),
+    t0: num(x.t0, Date.now()), a, words: (Array.isArray(x.words) ? x.words : []).map(Number).filter(k => W[k]) };
+}
 function normalize(o) {
   const s = fresh();
-  if (!o || typeof o !== 'object') return s;
-  ['w', 'days', 'modes', 'fav'].forEach(k => { if (o[k] && typeof o[k] === 'object' && !Array.isArray(o[k])) s[k] = o[k]; });
-  for (const k in s.w) if (!s.w[k] || typeof s.w[k] !== 'object') delete s.w[k];
-  s.set = { ...DEFAULTS, ...(o.set || {}) };
-  s.setup = { ...SETUP0, ...(o.setup || {}) };
-  if (!Array.isArray(s.setup.cards) || !s.setup.cards.length) s.setup.cards = SETUP0.cards.slice();
-  if (!Array.isArray(s.setup.levels) || !s.setup.levels.length) s.setup.levels = [3, 4, 5];
-  const ok = o.sess && Array.isArray(o.sess.qs) && o.sess.qs.length && o.sess.qs.every(q => q && W[q.wi] && (q.t !== 'past' || PAST[q.pid]) && (q.t !== 'cloze' || ORIG.has(q.wi)));
-  s.sess = ok ? o.sess : null;
-  s.since = o.since || s.since;
+  if (!isObj(o)) return s;
+  if (isObj(o.w)) for (const k in o.w) {
+    const r = o.w[k]; if (!HEADS.has(k) || !isObj(r)) continue;
+    const t = {};
+    for (const f of ['b', 'd', 'n', 'c', 'x', 'st', 'sd', 'lp', 'ls', 'lw', 'wb', 'gr']) if (r[f] != null) t[f] = num(r[f]);
+    t.b = Math.max(0, Math.min(6, Math.floor(t.b || 0)));
+    for (const f of ['d', 'n', 'c', 'x', 'st']) t[f] = t[f] || 0;
+    if (t.x && !t.lw) t.lw = t.ls || today();
+    s.w[k] = t;
+  }
+  if (isObj(o.days)) for (const k in o.days) { const r = o.days[k]; if (dnum(k) != null && isObj(r)) s.days[k] = { q: num(r.q), c: num(r.c), f: num(r.f) }; }
+  if (isObj(o.modes)) for (const k of TYPE_KEYS) { const r = o.modes[k]; if (isObj(r)) s.modes[k] = { q: num(r.q), c: num(r.c) }; }
+  if (isObj(o.fav)) for (const k in o.fav) if (HEADS.has(k) && o.fav[k]) s.fav[k] = num(o.fav[k], today());
+  const src = isObj(o.set) ? o.set : {};
+  const pickv = (k, allowed) => { const v = allowed.find(a => a === src[k] || (typeof a === 'number' && src[k] !== '' && src[k] != null && a === +src[k])); if (v !== undefined) s.set[k] = v; };
+  pickv('goal', [10, 20, 30, 50, 80, 100]); pickv('newN', [5, 10, 15, 20, 30]); pickv('reviewN', [20, 30, 50, 100]); pickv('grad', [0, 1, 2, 3]);
+  pickv('accent', ['en-US', 'en-GB']); pickv('rate', [0.7, 0.9, 1]); pickv('theme', ['auto', 'light', 'dark']); pickv('fs', ['m', 'l', 'xl']);
+  ['sound', 'autoSay', 'autoNext', 'mixTyping', 'zhFirst'].forEach(k => { if (typeof src[k] === 'boolean') s.set[k] = src[k]; });
+  if (typeof src.exam === 'string' && dnum(src.exam) != null) s.set.exam = src.exam;
+  const su = isObj(o.setup) ? o.setup : {};
+  if (MODE_KEYS.includes(su.mode)) s.setup.mode = su.mode;
+  if (Array.isArray(su.cards)) { const c = [...new Set(su.cards.map(Number).filter(n => Number.isInteger(n) && n >= 1 && n <= CARDS.length))].sort((a, b) => a - b); if (c.length) s.setup.cards = c; }
+  if (Array.isArray(su.levels)) { const lv = su.levels.map(Number), l = [3, 4, 5].filter(n => lv.includes(n)); if (l.length) s.setup.levels = l; }
+  if (FILTER_KEYS.includes(su.filter)) s.setup.filter = su.filter;
+  if ([10, 20, 30, 50, 100].includes(+su.count)) s.setup.count = +su.count;
+  if (['random', 'seq', 'weak'].includes(su.order)) s.setup.order = su.order;
+  if ([10, 20, 30].includes(+su.mockN)) s.setup.mockN = +su.mockN;
+  if (['mix', 'orig', 'past'].includes(su.mockSrc)) s.setup.mockSrc = su.mockSrc;
+  if (typeof su.mockTimed === 'boolean') s.setup.mockTimed = su.mockTimed;
+  s.sess = cleanSess(o.sess);
+  if (typeof o.since === 'string' && dnum(o.since) != null) s.since = o.since;
   return s;
 }
 let storeOK = true;
@@ -222,10 +277,11 @@ function modeHas(mode, w) {
 function clash(a, b) { if (a === b) return true; for (const x of a.bi) if (b.bi.has(x)) return true; return false; }
 function pickDistractors(w, n = 3) {
   const out = [];
-  const tryPool = pool => { for (const x of shuffle(pool)) { if (out.length >= n) return; if (x === w || out.includes(x) || clash(w, x) || out.some(y => clash(y, x))) continue; out.push(x); } };
+  const tryPool = pool => { for (const x of shuffle(pool)) { if (out.length >= n) return; if (x === w || out.includes(x) || (x.g === w.g && x.cat === w.cat) || clash(w, x) || out.some(y => clash(y, x))) continue; out.push(x); } };
   const same = w.card.words.filter(x => x.p1 === w.p1);
   const sec = (BYPOS[w.p1] || []).filter(x => x.card.sec === w.card.sec && x.g !== w.g);
   tryPool(same); tryPool(sec); tryPool(BYPOS[w.p1] || []); tryPool(W);
+  if (out.length < n) for (const x of shuffle(W)) { if (out.length >= n) break; if (x !== w && !out.includes(x) && !clash(w, x)) out.push(x); }
   return out;
 }
 function mixType(w) {
@@ -564,7 +620,7 @@ function vMe() {
   </section>
   <section class="card about"><div class="sec-h"><h2 style="color:var(--ink)">關於</h2><span class="num">版本 ${esc(window.APP_VER || '')}</span></div>
     <p>單字：大學入學考試中心《高中英文參考詞彙表》第 3–5 級，依 83–115 年學測與 91–110 年指考的出現情形挑出 1800 字，分 60 組。</p>
-    <p>歷屆詞彙題與考題例句：大學入學考試中心 92–115 學年度學測、93–110 學年度指考英文考科，著作權屬大考中心，僅供非營利學習使用。原創克漏字為本站自編。</p>
+    <p>歷屆詞彙題與考題例句：大學入學考試中心 92–115 學年度學測、93–110 學年度指考英文考科，著作權屬大考中心，僅供非營利學習使用。原創題為本站自編。</p>
     <p>作答紀錄只存在你的裝置，不會上傳。</p>
   </section>`;
 }
@@ -690,7 +746,7 @@ function optList(q, pj) {
     const x = o.wi >= 0 ? W[o.wi] : null, picked = pj === j;
     const cls = o.ok ? 'okc' : picked ? 'noc' : '';
     const label = zhOpt ? (x ? x.w : '') : o.t;
-    const mean = x ? (zhOpt ? x.zh : (norm(label) !== x.w.toLowerCase() && !x.forms.includes(norm(label)) ? `${x.w}：${x.zh}` : x.zh)) : '—';
+    const mean = x ? (zhOpt ? x.zh : (norm(label) !== x.w.toLowerCase() && !x.forms.includes(norm(label)) ? `${x.w}：${x.zh}` : x.zh)) : '（不在 1800 字範圍內）';
     return `<div class="${cls}"><span>${o.ok ? '✓' : picked ? '✗' : ''}</span><span class="e">${esc(label)}</span><span class="m">${esc(mean)}</span></div>`;
   }).join('')}</div>`;
 }
@@ -715,7 +771,7 @@ function showFb(q, ok, how) {
   setTimeout(() => { const f = $('#fb .fb'); if (f) f.scrollIntoView({ block: 'nearest', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }); if (q.opts) { const b = $('#nextBtn'); if (b) b.focus({ preventScroll: true }); } }, 40);
 }
 function nextQ() {
-  if (!Q) return;
+  if (!Q || Q.i >= Q.qs.length) return;
   clearTimeout(autoT); TTS.stop();
   Q.i++;
   if (Q.i >= Q.qs.length) return endQuiz();
@@ -889,6 +945,7 @@ function applyLook() {
 
 /* ================= 動作 ================= */
 const wOf = el => W[+el.dataset.wi];
+const busy = () => (OV === 'quiz' && !!Q && Q.i < Q.qs.length) || (OV === 'mock' && !!M && !M.done) || (OV === 'cards' && !!F && F.i < F.list.length);
 const ACT = {
   go: el => go(el.dataset.to),
   goFav: () => { listTab = 'fav'; go('wrong'); },
@@ -959,7 +1016,7 @@ const ACT = {
     const w = wOf(el);
     const types = ['e2c', 'c2e', 'cloze', 'past', 'coll', 'spell'].filter(t => hasType(t, w));
     closeSheet();
-    if (OV) { toast('請先完成目前的練習'); return; }
+    if (busy()) { toast('請先完成目前的練習'); return; }
     startQs(shuffle(types).map(t => makeQ(t, w)), `${w.w} 專練`, 'word', [w.i]);
   },
   quit: async () => {
@@ -1063,5 +1120,5 @@ if (ENV !== 'artifact' && 'serviceWorker' in navigator && (location.protocol ===
   window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
 }
 // 給自動測試用
-window.__app = { get S() { return S; }, render, go, openWord, W, ORIG, PAST, PAST_BY, CARDS, ACT, makeQ, pickDistractors, record, rangeWords, startQuiz, startMock, pick, submitTyping, nextQ, rate, get Q() { return Q; }, get M() { return M; }, get F() { return F; }, lvl, levelCounts, searchWords, mixType, clash };
+window.__app = { get S() { return S; }, normalize, render, go, openWord, W, ORIG, PAST, PAST_BY, CARDS, ACT, makeQ, pickDistractors, record, rangeWords, startQuiz, startMock, pick, submitTyping, nextQ, rate, get Q() { return Q; }, get M() { return M; }, get F() { return F; }, lvl, levelCounts, searchWords, mixType, clash };
 })();
