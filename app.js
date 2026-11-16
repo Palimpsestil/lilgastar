@@ -1,0 +1,1067 @@
+/* 學測英文 1800 單字測驗：純前端，不需要伺服器；作答紀錄存在這台裝置的瀏覽器（localStorage）。 */
+(() => {
+'use strict';
+const DATA = window.DATA;
+const ENV = window.APP_ENV || 'site';
+const ROOT = document.documentElement;
+if (ENV === 'artifact') ROOT.classList.add('env-artifact');
+
+/* ================= 小工具 ================= */
+const $ = (s, el = document) => el.querySelector(s);
+const $$ = (s, el = document) => Array.from(el.querySelectorAll(s));
+const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ESC[c]);
+const rnd = n => Math.floor(Math.random() * n);
+function shuffle(a) { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = rnd(i + 1); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+const pickOne = a => a[rnd(a.length)];
+const pad2 = n => String(n).padStart(2, '0');
+const norm = s => String(s || '').toLowerCase().replace(/[’‘`]/g, "'").replace(/\s+/g, ' ').trim();
+const ICON = {
+  speak: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/></svg>',
+  star: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3.8 2.5 5.1 5.6.8-4 4 .9 5.6-5-2.7-5 2.7.9-5.6-4-4 5.6-.8z"/></svg>',
+  search: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>',
+  left: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.5 6-6 6 6 6"/></svg>',
+  right: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9.5 6 6 6-6 6"/></svg>',
+};
+
+/* ================= 日期（以本地日期計天數） ================= */
+const DAY = 864e5;
+function today() { const d = new Date(); return Math.round(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / DAY); }
+function dkey(n = today()) { const d = new Date(n * DAY); return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`; }
+function dnum(s) { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || ''); return m ? Math.round(Date.UTC(+m[1], +m[2] - 1, +m[3]) / DAY) : null; }
+function md(n) { const d = new Date(n * DAY); return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`; }
+const WK = '日一二三四五六';
+function wk(n) { return WK[new Date(n * DAY).getUTCDay()]; }
+function fmtTime(sec) { const m = Math.floor(sec / 60), s = sec % 60; return m ? `${m} 分 ${pad2(s)} 秒` : `${s} 秒`; }
+
+/* ================= 資料 ================= */
+const CARDS = DATA.cards.map((c, i) => {
+  const sp = c[0].indexOf(' ');
+  return { no: i + 1, sec: c[0].slice(0, sp), secName: c[0].slice(sp + 1), topic: c[1], en: c[2], words: [] };
+});
+const SECS = [];
+CARDS.forEach(c => { let s = SECS.find(x => x.key === c.sec); if (!s) SECS.push(s = { key: c.sec, name: c.secName, cards: [] }); s.cards.push(c.no); });
+
+function formsOf(head) {
+  const out = [];
+  head.split('/').forEach(part => {
+    part = part.trim();
+    const m = /^([A-Za-z\-]+)\(([a-z]+)\)$/.exec(part);
+    if (m) out.push(m[1].toLowerCase(), (m[1] + m[2]).toLowerCase()); else out.push(part.toLowerCase());
+  });
+  return out;
+}
+const ZH_STOP = new Set(['某人', '某事', '某物', '東西', '事情', '一種', '一個', '使人', '令人', '感到', '進行']);
+function zhBigrams(zh) {
+  const set = new Set();
+  zh.replace(/（[^）]*）|\([^)]*\)/g, '').split(/[；;，,、]/).forEach(s => {
+    s = s.replace(/[的地得之]/g, '').trim();
+    if (s.length === 1) set.add(s);
+    for (let i = 0; i < s.length - 1; i++) { const b = s.slice(i, i + 2); if (!ZH_STOP.has(b)) set.add(b); }
+  });
+  return set;
+}
+const W = DATA.W.map((a, i) => {
+  const w = { i, w: a[0], p: a[1], zh: a[2], k: a[3], g: a[4], cat: a[5], lv: a[6], gs: a[7], g10: a[8], as: a[9], ca: a[10], op: a[11], ex: a[12] };
+  w.pos = a[1].split('/').map(s => s.replace(/[()]/g, '')).filter(Boolean);
+  w.p1 = w.pos[0];
+  w.forms = formsOf(a[0]);
+  w.say = w.forms[0];
+  w.card = CARDS[w.g - 1];
+  w.card.words.push(w);
+  w.bi = zhBigrams(a[2]);
+  w.kb = a[3].filter(x => x.includes('{'));
+  return w;
+});
+const BYPOS = {};
+W.forEach(w => (BYPOS[w.p1] = BYPOS[w.p1] || []).push(w));
+const ORIG = new Map();
+DATA.O.forEach(a => ORIG.set(a[0], { wi: a[0], pos: a[1], s: a[2], ds: a[3], di: a[4], zh: a[5] }));
+const PAST = DATA.P.map((a, j) => ({ id: j, wi: a[0], src: a[1], no: a[2], stem: a[3], opts: a[4], ans: a[5], oi: a[6], der: a[7] }));
+const PAST_BY = new Map();
+PAST.forEach(p => { if (!PAST_BY.has(p.wi)) PAST_BY.set(p.wi, []); PAST_BY.get(p.wi).push(p); });
+
+/* ================= 儲存 ================= */
+const KEY = 'gsat1800-v1';
+const DEFAULTS = { goal: 30, newN: 10, grad: 2, sound: true, autoSay: true, accent: 'en-US', rate: 0.9, autoNext: false,
+  mixTyping: false, zhFirst: false, theme: 'auto', fs: 'm', exam: '2027-01-22', reviewN: 30 };
+const SETUP0 = { mode: 'e2c', cards: CARDS.map(c => c.no), levels: [3, 4, 5], filter: 'all', count: 20, order: 'random',
+  mockN: 10, mockSrc: 'mix', mockTimed: true };
+function fresh() { return { app: 'gsat1800', v: 1, w: {}, days: {}, modes: {}, fav: {}, set: { ...DEFAULTS }, setup: { ...SETUP0, cards: SETUP0.cards.slice() }, sess: null, since: dkey() }; }
+function normalize(o) {
+  const s = fresh();
+  if (!o || typeof o !== 'object') return s;
+  ['w', 'days', 'modes', 'fav'].forEach(k => { if (o[k] && typeof o[k] === 'object' && !Array.isArray(o[k])) s[k] = o[k]; });
+  for (const k in s.w) if (!s.w[k] || typeof s.w[k] !== 'object') delete s.w[k];
+  s.set = { ...DEFAULTS, ...(o.set || {}) };
+  s.setup = { ...SETUP0, ...(o.setup || {}) };
+  if (!Array.isArray(s.setup.cards) || !s.setup.cards.length) s.setup.cards = SETUP0.cards.slice();
+  if (!Array.isArray(s.setup.levels) || !s.setup.levels.length) s.setup.levels = [3, 4, 5];
+  const ok = o.sess && Array.isArray(o.sess.qs) && o.sess.qs.length && o.sess.qs.every(q => q && W[q.wi] && (q.t !== 'past' || PAST[q.pid]) && (q.t !== 'cloze' || ORIG.has(q.wi)));
+  s.sess = ok ? o.sess : null;
+  s.since = o.since || s.since;
+  return s;
+}
+let storeOK = true;
+function load() { try { const t = localStorage.getItem(KEY); return normalize(t ? JSON.parse(t) : null); } catch (e) { storeOK = false; return fresh(); } }
+let S = load();
+function save() {
+  try { localStorage.setItem(KEY, JSON.stringify(S)); storeOK = true; }
+  catch (e) { if (storeOK) toast('這個瀏覽器無法儲存進度（可能是無痕模式）'); storeOK = false; }
+}
+
+/* ================= 熟練度與間隔複習 ================= */
+// 盒子 b：0 未學、1–2 學習中、3–4 熟悉、5–6 精熟；答對且當天第一次升級才升一盒，間隔 1/2/4/7/15/30 天
+const INT = [0, 1, 2, 4, 7, 15, 30];
+const LVN = ['未學', '學習中', '熟悉', '精熟'];
+const wsMake = w => S.w[w.w] || (S.w[w.w] = { b: 0, d: 0, n: 0, c: 0, x: 0, st: 0 });
+function lvl(w) { const s = S.w[w.w]; if (!s || (!s.n && !s.b)) return 0; return s.b >= 5 ? 3 : s.b >= 3 ? 2 : 1; }
+const isDue = (w, t = today()) => { const s = S.w[w.w]; return !!s && s.b > 0 && s.d <= t; };
+const isWrong = w => !!(S.w[w.w] && S.w[w.w].wb);
+const isFav = w => !!S.fav[w.w];
+function dayRec() { const k = dkey(); return S.days[k] || (S.days[k] = { q: 0, c: 0, f: 0 }); }
+function record(w, ok, type, how = {}) {
+  const s = wsMake(w), t = today();
+  s.n++; s.ls = t;
+  if (ok) {
+    s.c++;
+    if (how.hint) { if (s.b < 1) s.b = 1; s.d = Math.min(s.d || t + 1, t + 1); }
+    else {
+      if (s.sd !== t) { s.st = (s.st || 0) + 1; s.sd = t; }
+      if (s.lp !== t) { s.b = Math.min(6, (s.b || 0) + 1); s.lp = t; }
+      s.d = t + INT[s.b];
+      if (s.wb && S.set.grad > 0 && s.st >= S.set.grad) { s.wb = 0; s.gr = t; toast(`${w.w} 從錯題本畢業了`); }
+    }
+  } else {
+    s.x++; s.st = 0; s.sd = t; s.b = 1; s.d = t; s.lp = t; s.wb = 1; s.lw = t;
+  }
+  const r = dayRec(); r.q++; if (ok) r.c++;
+  const m = S.modes[type] || (S.modes[type] = { q: 0, c: 0 }); m.q++; if (ok) m.c++;
+}
+function markEasy(w) { const s = wsMake(w), t = today(); s.b = Math.max(s.b, 5); s.d = t + INT[s.b]; s.lp = t; s.ls = t; s.wb = 0; }
+function rateCard(w, r) {
+  const s = wsMake(w), t = today(); s.ls = t;
+  if (r === 1) { s.b = 1; s.d = t; }
+  else if (r === 2) { if (s.b < 1) { s.b = 1; s.d = t + 1; } }
+  else markEasy(w);
+  dayRec().f++;
+}
+function streak() {
+  let t = today(), n = 0;
+  const act = k => { const r = S.days[dkey(k)]; return r && (r.q || r.f); };
+  if (!act(t)) t--;
+  while (act(t)) { n++; t--; }
+  return n;
+}
+function levelCounts(list) { const L = [0, 0, 0, 0]; list.forEach(w => L[lvl(w)]++); return L; }
+
+/* ================= 發音（瀏覽器內建語音） ================= */
+const TTS = {
+  ok: typeof window.speechSynthesis !== 'undefined' && typeof window.SpeechSynthesisUtterance !== 'undefined',
+  v: null,
+  pick() {
+    if (!this.ok) return;
+    try {
+      const vs = window.speechSynthesis.getVoices() || [];
+      const want = S.set.accent;
+      const en = vs.filter(v => (v.lang || '').replace('_', '-').toLowerCase().startsWith('en'));
+      const exact = en.filter(v => v.lang.replace('_', '-').toLowerCase() === want.toLowerCase());
+      const pref = /Samantha|Ava|Allison|Susan|Google US|Daniel|Serena|Kate|Google UK|Aria|Jenny|Guy|Libby|Sonia/;
+      this.v = exact.find(v => pref.test(v.name)) || exact.find(v => v.localService) || exact[0] || en[0] || null;
+    } catch (e) { this.v = null; }
+  },
+  say(text) {
+    if (!this.ok || !S.set.sound || !text) return;
+    try {
+      window.speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = this.v ? this.v.lang : S.set.accent;
+      if (this.v) u.voice = this.v;
+      u.rate = S.set.rate;
+      window.speechSynthesis.speak(u);
+    } catch (e) { /* 不支援就安靜略過 */ }
+  },
+  stop() { try { if (this.ok) window.speechSynthesis.cancel(); } catch (e) {} },
+};
+if (TTS.ok) { TTS.pick(); try { window.speechSynthesis.onvoiceschanged = () => TTS.pick(); } catch (e) {} }
+const canListen = () => TTS.ok && S.set.sound;
+
+/* ================= 題目 ================= */
+const TYPES = {
+  e2c: { name: '英選中', desc: '給英文單字，從四個中文意思選出正確的' },
+  c2e: { name: '中選英', desc: '給中文意思，從四個英文單字選出正確的' },
+  cloze: { name: '原創題', desc: '本站自編的學測詞彙題，1800 字各一題' },
+  past: { name: '歷屆詞彙題', desc: '學測、指考真題，官方選項' },
+  listen: { name: '聽音辨義', desc: '聽發音，選中文意思' },
+  coll: { name: '搭配詞填空', desc: '打出常見搭配裡缺的字', typing: true },
+  spell: { name: '拼字', desc: '看中文，拼出英文', typing: true },
+};
+const MODES = [
+  { id: 'e2c', ...TYPES.e2c }, { id: 'c2e', ...TYPES.c2e }, { id: 'cloze', ...TYPES.cloze },
+  { id: 'mix', name: '綜合練習', desc: '選擇題題型混合出題' },
+  { id: 'past', ...TYPES.past },
+  { id: 'mock', name: '模擬考', desc: '詞彙題限時測驗，交卷才對答案' },
+  { id: 'cards', name: '字卡', desc: '翻卡背誦，自己評熟悉度' },
+  { id: 'coll', ...TYPES.coll }, { id: 'spell', ...TYPES.spell }, { id: 'listen', ...TYPES.listen },
+];
+// 三種主要模式：1 英選中、2 中選英、3 原創題
+const MAIN_MODES = ['e2c', 'c2e', 'cloze'];
+const modeName = m => (MODES.find(x => x.id === m) || {}).name || '練習';
+function hasType(t, w) {
+  if (t === 'cloze') return ORIG.has(w.i);
+  if (t === 'past') return PAST_BY.has(w.i);
+  if (t === 'coll') return w.kb.length > 0;
+  if (t === 'listen') return canListen();
+  return true;
+}
+function modeHas(mode, w) {
+  if (mode === 'mix' || mode === 'cards') return true;
+  if (mode === 'mock') { const src = S.setup.mockSrc; return (src !== 'past' && ORIG.has(w.i)) || (src !== 'orig' && PAST_BY.has(w.i)); }
+  return hasType(mode, w);
+}
+function clash(a, b) { if (a === b) return true; for (const x of a.bi) if (b.bi.has(x)) return true; return false; }
+function pickDistractors(w, n = 3) {
+  const out = [];
+  const tryPool = pool => { for (const x of shuffle(pool)) { if (out.length >= n) return; if (x === w || out.includes(x) || clash(w, x) || out.some(y => clash(y, x))) continue; out.push(x); } };
+  const same = w.card.words.filter(x => x.p1 === w.p1);
+  const sec = (BYPOS[w.p1] || []).filter(x => x.card.sec === w.card.sec && x.g !== w.g);
+  tryPool(same); tryPool(sec); tryPool(BYPOS[w.p1] || []); tryPool(W);
+  return out;
+}
+function mixType(w) {
+  const o = [['e2c', 3], ['c2e', 3]];
+  if (ORIG.has(w.i)) o.push(['cloze', 4]);
+  if (PAST_BY.has(w.i)) o.push(['past', 3]);
+  if (canListen()) o.push(['listen', 1]);
+  if (S.set.mixTyping) { o.push(['spell', 1]); if (w.kb.length) o.push(['coll', 1]); }
+  let r = Math.random() * o.reduce((a, b) => a + b[1], 0);
+  for (const [t, wt] of o) if ((r -= wt) < 0) return t;
+  return 'e2c';
+}
+function makeQ(t, w, p) {
+  if (t === 'cloze') {
+    const o = ORIG.get(w.i), ans = o.s.match(/\{([^}]+)\}/)[1];
+    return { t, wi: w.i, opts: shuffle([{ t: ans, wi: w.i, ok: 1 }, ...o.ds.map((d, j) => ({ t: d, wi: o.di[j], ok: 0 }))]) };
+  }
+  if (t === 'past') {
+    p = p || pickOne(PAST_BY.get(w.i));
+    return { t, wi: w.i, pid: p.id, opts: p.opts.map((x, j) => ({ t: x, wi: p.oi[j], ok: j === p.ans ? 1 : 0 })) };
+  }
+  if (t === 'coll') { const k = pickOne(w.kb); return { t, wi: w.i, k, acc: [k.match(/\{([^}]+)\}/)[1].toLowerCase()], h: 1 }; }
+  if (t === 'spell') return { t, wi: w.i, acc: w.forms.slice(), h: 1 };
+  const ds = pickDistractors(w);
+  return { t, wi: w.i, opts: shuffle([w, ...ds]).map(x => ({ t: t === 'c2e' ? x.w : x.zh, wi: x.i, ok: x === w ? 1 : 0 })) };
+}
+function retryOf(q) {
+  const c = { ...q, retry: 1 };
+  if (q.opts && q.t !== 'past') c.opts = shuffle(q.opts);
+  if (q.h) c.h = 1;
+  return c;
+}
+
+/* ================= 範圍與排序 ================= */
+const FILTERS = [['all', '全部'], ['new', '沒學過'], ['learning', '學習中'], ['due', '到期複習'], ['wrong', '錯題本'], ['fav', '收藏'], ['ans', '曾當考題答案'], ['recent', '近十年學測出現']];
+function passFilter(w, f, t) {
+  const s = S.w[w.w];
+  switch (f) {
+    case 'new': return lvl(w) === 0;
+    case 'learning': return lvl(w) === 1;
+    case 'due': return !!(s && s.b > 0 && s.d <= t);
+    case 'wrong': return !!(s && s.wb);
+    case 'fav': return !!S.fav[w.w];
+    case 'ans': return w.ca > 0;
+    case 'recent': return w.g10 > 0;
+    default: return true;
+  }
+}
+function rangeWords(st = S.setup) {
+  const cs = new Set(st.cards), lv = new Set(st.levels), t = today();
+  return W.filter(w => cs.has(w.g) && lv.has(w.lv) && passFilter(w, st.filter, t));
+}
+function orderWords(list, order) {
+  if (order === 'seq') return list.slice().sort((a, b) => a.i - b.i);
+  if (order === 'weak') {
+    const t = today();
+    const sc = w => { const s = S.w[w.w]; if (!s || (!s.n && !s.b)) return 3; if (s.wb) return 0; if (s.d <= t) return 1; return 2 + s.b / 10; };
+    return shuffle(list).sort((a, b) => sc(a) - sc(b));
+  }
+  return shuffle(list);
+}
+function rangeLabel(st) {
+  if (st.cards.length === CARDS.length) return '全部 60 組';
+  const secs = SECS.filter(s => s.cards.every(n => st.cards.includes(n)));
+  const partial = st.cards.filter(n => !secs.some(s => s.cards.includes(n)));
+  const parts = secs.map(s => `${s.key} ${s.name}`);
+  if (partial.length) parts.push(partial.length <= 4 ? `第 ${partial.sort((a, b) => a - b).join('、')} 組` : `另 ${partial.length} 組`);
+  return `${st.cards.length} 組：${parts.join('、')}`;
+}
+
+/* ================= 介面小元件 ================= */
+let toastT = 0;
+function toast(msg) { const t = $('#toast'); if (!t) return; t.textContent = msg; t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 2400); }
+let dlgDone = null;
+function ask(msg, yes = '確定', no = '取消') {
+  return new Promise(res => {
+    const d = $('#dialog');
+    $('#dlgMsg').textContent = msg; $('#dlgYes').textContent = yes; $('#dlgNo').textContent = no;
+    d.hidden = false;
+    const done = v => { d.hidden = true; dlgDone = null; res(v); };
+    dlgDone = done;
+    $('#dlgYes').onclick = () => done(true);
+    $('#dlgNo').onclick = () => done(false);
+    setTimeout(() => $('#dlgNo').focus(), 30);
+  });
+}
+function openSheet(html) { $('#sheetBody').innerHTML = html; $('#sheet').hidden = false; $('.sheet').scrollTop = 0; }
+let sheetClose = null;
+function closeSheet() { $('#sheet').hidden = true; const f = sheetClose; sheetClose = null; if (f) f(); }
+const sayBtn = (text, cls = 'say') => S.set.sound && TTS.ok ? `<button class="${cls}" type="button" data-act="say" data-text="${esc(text)}" aria-label="念出 ${esc(text)}">${ICON.speak}</button>` : '';
+const starBtn = w => `<button class="icon-btn ${isFav(w) ? 'on' : ''}" type="button" data-act="star" data-wi="${w.i}" aria-pressed="${isFav(w)}" aria-label="收藏 ${esc(w.w)}">${ICON.star}</button>`;
+function mbar(L) {
+  return `<div class="mbar" role="img" aria-label="精熟 ${L[3]}、熟悉 ${L[2]}、學習中 ${L[1]}、未學 ${L[0]}">${[3, 2, 1, 0].filter(k => L[k]).map(k => `<i class="L${k}" style="flex:${L[k]} 1 0"></i>`).join('')}</div>`;
+}
+function legend(L) { return `<div class="legend">${[[3, '精熟'], [2, '熟悉'], [1, '學習中'], [0, '未學']].map(([k, n]) => `<span><i class="L${k}"></i>${n} <b>${L[k]}</b></span>`).join('')}</div>`; }
+function minibar(L) { return `<span class="minibar">${[3, 2, 1, 0].filter(k => L[k]).map(k => `<i class="L${k}" style="flex:${L[k]} 1 0"></i>`).join('')}</span>`; }
+function wordRow(w, meta = '') {
+  const L = lvl(w);
+  return `<div class="wrow"><span class="dot L${L}" title="${LVN[L]}"></span><button class="main" type="button" data-act="word" data-wi="${w.i}"><b>${esc(w.w)}</b><small><i>${esc(w.p)}</i>${esc(w.zh)}</small></button><span class="side">${meta ? `<span class="meta">${meta}</span>` : ''}${starBtn(w)}</span></div>`;
+}
+const blankStem = s => esc(s).replace(/\{[^}]+\}/, '<span class="blank">_____</span>');
+const fillStem = s => esc(s).replace(/\{([^}]+)\}/, '<mark>$1</mark>');
+const pastBlank = p => esc(p.stem).replace('_____', '<span class="blank">_____</span>');
+const pastFill = p => esc(p.stem).replace('_____', `<mark>${esc(p.opts[p.ans])}</mark>`);
+function exHTML(ex) {
+  if (!ex) return '';
+  const i = ex.indexOf('：');
+  const src = i > 0 ? ex.slice(0, i) : '', txt = i > 0 ? ex.slice(i + 1) : ex;
+  return `<p class="ex">${esc(txt).replace(/\[([^\]]+)\]/g, '<mark>$1</mark>')}</p>${src ? `<p class="src">出處：大考中心 ${esc(src)}英文考科（節錄）</p>` : ''}`;
+}
+function patHTML(a, h) { return a.split('').map((ch, i) => i < h ? `<b>${esc(ch)}</b>` : /[A-Za-z]/.test(ch) ? '_' : esc(ch)).join(' '); }
+async function copyText(text, okMsg = '已複製') {
+  try { await navigator.clipboard.writeText(text); toast(okMsg); }
+  catch (e) { showCopyBox(text, '請長按下面的文字，全選後複製。'); }
+}
+function showCopyBox(text, msg) {
+  openSheet(`<h2 id="sheetTitle">複製文字</h2><p class="muted">${esc(msg)}</p><textarea class="copybox" id="copyBox" readonly>${esc(text)}</textarea>`);
+  setTimeout(() => { const b = $('#copyBox'); if (b) { b.focus(); b.select(); } }, 60);
+}
+function download(name, text) {
+  if (ENV === 'artifact') { showCopyBox(text, '預覽版不能下載檔案。請把下面的備份碼複製起來，貼到記事本保存。'); return; }
+  try {
+    const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+    const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1500);
+    toast('備份檔已下載');
+  } catch (e) { showCopyBox(text, '無法下載檔案，請改用複製備份碼。'); }
+}
+
+/* ================= 分頁 ================= */
+let view = 'home', cardNo = 1, searchQ = '', listTab = 'wrong', listSort = 'recent';
+
+function vHome() {
+  const t = today(), rec = S.days[dkey()] || { q: 0, c: 0, f: 0 };
+  const due = W.filter(w => isDue(w, t));
+  const wrongN = W.filter(isWrong).length;
+  const fresh0 = W.filter(w => lvl(w) === 0);
+  const pct = Math.min(100, Math.round(rec.q / S.set.goal * 100));
+  const exam = dnum(S.set.exam), left = exam == null ? null : exam - t;
+  const L = levelCounts(W), stk = streak();
+  const ss = S.sess;
+  const resume = ss && ss.i < ss.qs.length ? `<div class="resume"><p>上次的「${esc(ss.title)}」做到第 ${ss.i + 1} / ${ss.qs.length} 題</p><div class="btn-row" style="flex:none"><button class="btn small ghost" type="button" data-act="dropResume">不用了</button><button class="btn small primary" type="button" data-act="resume">繼續</button></div></div>` : '';
+  return `
+  <header class="top">
+    <div><p class="eyebrow">學測英文 · 核心 1800 單字</p><h1>今天練什麼？</h1></div>
+    ${left != null && left >= 0 ? `<div class="countdown" aria-label="距離學測還有 ${left} 天"><span>距學測</span><b>${left}</b><span>天・${md(exam)}（${wk(exam)}）</span></div>` : ''}
+  </header>
+  ${resume}
+  <section class="card goal">
+    <div class="ring" style="--p:${pct}" role="img" aria-label="今天已答 ${rec.q} 題，目標 ${S.set.goal} 題"><div><b>${rec.q}</b><small>/ ${S.set.goal} 題</small></div></div>
+    <div class="goal-txt">
+      <h2>${rec.q >= S.set.goal ? '今天的目標達成了' : `今天還差 ${S.set.goal - rec.q} 題`}</h2>
+      <p>答對 ${rec.c} 題${rec.f ? `・看了 ${rec.f} 張字卡` : ''}</p>
+      ${stk ? `<span class="streak">連續 ${stk} 天</span>` : ''}
+    </div>
+  </section>
+  <section class="hero-actions">
+    <button class="big ${due.length ? 'primary' : ''}" type="button" data-act="review"><b>今日複習</b><span>${due.length ? `${due.length} 個字到期，這輪複習 ${Math.min(due.length, S.set.reviewN)} 個` : '目前沒有到期的字'}</span></button>
+    <button class="big ${due.length ? '' : 'primary'}" type="button" data-act="learn"><b>學新字</b><span>${fresh0.length ? `從第 ${fresh0[0].g} 組接著學 ${Math.min(S.set.newN, fresh0.length)} 個` : '1800 字都學過了'}</span></button>
+  </section>
+  <section class="card">
+    <div class="sec-h"><h2>三種練習模式</h2><span class="muted num">${esc(rangeLabel(S.setup).split('：')[0])}・每次 ${S.setup.count} 題</span></div>
+    <div class="modes3 home">${MAIN_MODES.map((id, k) => `<button class="mode main" type="button" data-act="quickMode" data-m="${id}"><span class="mnum">${k + 1}</span><b>${TYPES[id].name}</b><span>${TYPES[id].desc}</span></button>`).join('')}</div>
+  </section>
+  <section class="quick">
+    <button type="button" data-act="go" data-to="wrong"><b class="num">${wrongN}</b>錯題本</button>
+    <button type="button" data-act="mockNow"><b class="num">10 題</b>模擬考</button>
+    <button type="button" data-act="goFav"><b class="num">${Object.keys(S.fav).length}</b>收藏</button>
+  </section>
+  <section class="card">
+    <div class="sec-h"><h2>1800 字掌握度</h2><span class="muted num">熟悉以上 ${L[2] + L[3]} 字</span></div>
+    ${mbar(L)}${legend(L)}
+  </section>
+  ${!storeOK ? '<p class="empty">這個瀏覽器目前無法儲存進度，關掉網頁後紀錄會消失。</p>' : ''}`;
+}
+
+function vPractice() {
+  const st = S.setup, range = rangeWords(st), inR = new Set(range.map(w => w.i));
+  const cnt = m => m === 'past' ? PAST.filter(p => inR.has(p.wi)).length : range.filter(w => modeHas(m, w)).length;
+  const chip = (k, v, on, label) => `<button class="chip" type="button" data-act="opt" data-k="${k}" data-v="${v}" aria-pressed="${on}">${label}</button>`;
+  const isMock = st.mode === 'mock';
+  const avail = cnt(st.mode);
+  const n = isMock ? Math.min(st.mockN, avail) : st.mode === 'past' ? Math.min(st.count, avail) : Math.min(st.count, avail);
+  return `
+  <header class="top"><div><p class="eyebrow">自訂練習</p><h1>選題型和範圍</h1></div></header>
+  <section class="opt-group"><span class="opt-label">三種主要模式</span>
+    <div class="modes3">${MODES.filter(m => MAIN_MODES.includes(m.id)).map((m, k) => modeBtn(m, cnt(m.id), st.mode, k + 1)).join('')}</div>
+  </section>
+  <section class="opt-group"><span class="opt-label">更多練習</span>
+    <div class="modes">${MODES.filter(m => !MAIN_MODES.includes(m.id)).map(m => modeBtn(m, cnt(m.id), st.mode)).join('')}</div>
+  </section>
+  <section class="card opt-group">
+    <div class="range-sum"><div style="min-width:0"><span class="opt-label">範圍</span><p>${esc(rangeLabel(st))}</p></div><button class="btn small" type="button" data-act="pickCards">選組別</button></div>
+    <div class="opt-group"><span class="opt-label">級別（大考中心詞彙表）</span><div class="chips">${[3, 4, 5].map(l => chip('lv', l, st.levels.includes(l), `第 ${l} 級`)).join('')}</div></div>
+    <div class="opt-group"><span class="opt-label">篩選</span><div class="chips">${FILTERS.map(([k, nm]) => chip('filter', k, st.filter === k, nm)).join('')}</div></div>
+    ${isMock ? `
+    <div class="opt-group"><span class="opt-label">題數</span><div class="chips">${[10, 20, 30].map(v => chip('mockN', v, st.mockN === v, `${v} 題`)).join('')}</div></div>
+    <div class="opt-group"><span class="opt-label">題目來源</span><div class="chips">${[['mix', '原創＋歷屆'], ['orig', '只出原創題'], ['past', '只出歷屆題']].map(([k, nm]) => chip('mockSrc', k, st.mockSrc === k, nm)).join('')}</div></div>
+    <div class="opt-group"><span class="opt-label">時間</span><div class="chips">${chip('mockTimed', 1, st.mockTimed, '每題 1 分鐘')}${chip('mockTimed', 0, !st.mockTimed, '不限時')}</div></div>` : `
+    <div class="opt-group"><span class="opt-label">${st.mode === 'cards' ? '張數' : '題數'}</span><div class="chips">${[10, 20, 30, 50, 100].map(v => chip('count', v, st.count === v, String(v))).join('')}</div></div>
+    <div class="opt-group"><span class="opt-label">出題順序</span><div class="chips">${[['random', '隨機'], ['seq', '依組別順序'], ['weak', '弱點優先']].map(([k, nm]) => chip('order', k, st.order === k, nm)).join('')}</div></div>`}
+    <p class="muted" style="font-size:.85rem">符合範圍的字：${range.length} 個${st.mode !== 'mix' && st.mode !== 'cards' ? `，${modeName(st.mode)}可出 ${avail} ${st.mode === 'past' || isMock ? '題' : '字'}` : ''}</p>
+  </section>
+  <div class="start-bar"><button class="btn primary" type="button" data-act="startSetup" ${n ? '' : 'disabled'}>${n ? `開始${modeName(st.mode)}・${n} ${st.mode === 'cards' ? '張' : '題'}` : '這個範圍沒有題目'}</button></div>`;
+}
+
+function modeBtn(m, c, cur, num) {
+  const dis = m.id === 'listen' && !canListen();
+  const unit = m.id === 'past' || m.id === 'mock' ? '題' : '字';
+  return `<button class="mode ${num ? 'main' : ''}" type="button" data-act="setMode" data-m="${m.id}" aria-pressed="${cur === m.id}" ${dis ? 'disabled' : ''}>${num ? `<span class="mnum">${num}</span>` : ''}<b>${m.name}</b><span>${dis ? '這個瀏覽器不支援發音，或已在設定關閉' : m.desc}</span><em>${c} ${unit}可出</em></button>`;
+}
+
+function cardPickHTML() {
+  const sel = new Set(S.setup.cards);
+  return `<h2 id="sheetTitle">選擇組別</h2>
+  <div class="btn-row"><button class="btn small" type="button" data-act="cardsAll" data-v="1">全選</button><button class="btn small" type="button" data-act="cardsAll" data-v="0">全不選</button><button class="btn small primary" type="button" data-act="closeSheet">完成（${sel.size} 組）</button></div>
+  <div class="pickcards">${SECS.map(sec => `<div class="sec"><div class="sec-h"><h2>${sec.key} ${esc(sec.name)}</h2><button class="btn small ghost" type="button" data-act="secToggle" data-s="${sec.key}">${sec.cards.every(n => sel.has(n)) ? '取消這類' : '整類選取'}</button></div>
+    <div class="cgrid">${sec.cards.map(no => `<button class="cpick" type="button" data-act="cardToggle" data-no="${no}" aria-pressed="${sel.has(no)}"><b>${pad2(no)}</b>${esc(CARDS[no - 1].topic)}</button>`).join('')}</div></div>`).join('')}</div>`;
+}
+
+function sectionsHTML() {
+  return SECS.map(sec => `<section class="sec-block"><h2>${sec.key} ${esc(sec.name)}<span>第 ${sec.cards[0]}–${sec.cards[sec.cards.length - 1]} 組</span></h2>
+    <div class="clist">${sec.cards.map(no => { const c = CARDS[no - 1], L = levelCounts(c.words); return `<a class="crow" href="#card-${no}"><span class="no">${pad2(no)}</span><span class="t"><b>${esc(c.topic)}</b><small>${esc(c.en)}</small>${minibar(L)}</span><span class="pc">${L[2] + L[3]}/${c.words.length}<br>熟悉</span></a>`; }).join('')}</div></section>`).join('');
+}
+function searchWords(q) {
+  q = norm(q); if (!q) return [];
+  const zh = /[㐀-鿿]/.test(q), res = [];
+  for (const w of W) {
+    let sc = -1;
+    if (zh) { if (w.zh.includes(q)) sc = w.zh.startsWith(q) ? 1 : 2; else if (w.cat.includes(q) || w.card.topic.includes(q)) sc = 4; }
+    else {
+      const head = w.w.toLowerCase();
+      if (w.forms.includes(q)) sc = 0;
+      else if (w.forms.some(f => f.startsWith(q))) sc = 1;
+      else if (q.length >= 4 && w.forms.some(f => f.length >= 3 && q.startsWith(f) && q.length - f.length <= 3)) sc = 1.5;
+      else if (head.includes(q)) sc = 2;
+      else if (w.k.some(k => k.toLowerCase().replace(/[{}]/g, '').includes(q))) sc = 3;
+    }
+    if (sc >= 0) res.push([sc, w]);
+  }
+  return res.sort((a, b) => a[0] - b[0] || a[1].i - b[1].i).slice(0, 80).map(x => x[1]);
+}
+function resultsHTML() {
+  const list = searchWords(searchQ);
+  if (!list.length) return `<p class="empty">找不到「${esc(searchQ)}」。可以輸入英文、中文意思或搭配詞。</p>`;
+  return `<p class="muted" style="font-size:.85rem">${list.length >= 80 ? '前 80' : list.length} 個結果</p><div class="wlist">${list.map(w => wordRow(w, `第 ${w.g} 組`)).join('')}</div>`;
+}
+function vWords() {
+  return `<header class="top"><div><p class="eyebrow">單字庫</p><h1>60 組・1800 字</h1></div></header>
+  <div class="search">${ICON.search}<input id="q" type="search" placeholder="搜尋英文、中文或搭配詞" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" value="${esc(searchQ)}" aria-label="搜尋單字"></div>
+  <div id="results" class="view">${searchQ.trim() ? resultsHTML() : sectionsHTML()}</div>`;
+}
+function vCard(no) {
+  const c = CARDS[no - 1], L = levelCounts(c.words);
+  let last = '';
+  const rows = c.words.map(w => { const h = w.cat !== last ? `<div class="cat-h">${esc(w.cat)}</div>` : ''; last = w.cat; return h + wordRow(w); }).join('');
+  return `<div><a class="back" href="#words">${ICON.left}單字庫</a>
+  <header class="top"><div><p class="eyebrow">${esc(c.sec)} ${esc(c.secName)}・第 ${no} 組</p><h1>${esc(c.topic)}</h1><p class="muted en">${esc(c.en)}</p></div></header></div>
+  <section class="card">${mbar(L)}${legend(L)}</section>
+  <div class="btn-row"><button class="btn primary" type="button" data-act="cardQuiz" data-no="${no}">練習這組 30 字</button><button class="btn" type="button" data-act="cardFlash" data-no="${no}">看字卡</button></div>
+  <div class="wlist">${rows}</div>
+  <div class="btn-row">${no > 1 ? `<a class="btn" href="#card-${no - 1}">${ICON.left}第 ${no - 1} 組</a>` : ''}${no < CARDS.length ? `<a class="btn" href="#card-${no + 1}">第 ${no + 1} 組${ICON.right}</a>` : ''}</div>`;
+}
+
+function listWords(tab) {
+  if (tab === 'fav') return W.filter(isFav);
+  if (tab === 'grad') return W.filter(w => { const s = S.w[w.w]; return s && !s.wb && s.x > 0; });
+  return W.filter(isWrong);
+}
+function vWrong() {
+  const tabs = [['wrong', '錯題'], ['fav', '收藏'], ['grad', '已畢業']];
+  let list = listWords(listTab);
+  if (listTab !== 'fav') list = list.slice().sort((a, b) => { const x = S.w[a.w], y = S.w[b.w]; return listSort === 'often' ? (y.x - x.x) || (y.lw - x.lw) : (y.lw - x.lw) || (y.x - x.x); });
+  const meta = w => { const s = S.w[w.w]; return listTab === 'fav' ? `第 ${w.g} 組` : `錯 ${s.x} 次・${md(s.lw)}`; };
+  const emptyMsg = {
+    wrong: `還沒有錯題。練習時答錯的字會自動收進來；之後在 ${S.set.grad || '數'} 個不同的日子答對，就會自動移出。`,
+    fav: '還沒有收藏。看到想加強的字，點星號就會收進這裡。',
+    grad: '答錯後又練會的字會移到這裡。',
+  }[listTab];
+  return `<header class="top"><div><p class="eyebrow">我的清單</p><h1>錯題本與收藏</h1></div></header>
+  <div class="chips" role="tablist">${tabs.map(([k, n]) => `<button class="chip" type="button" role="tab" data-act="listTab" data-v="${k}" aria-pressed="${listTab === k}" aria-selected="${listTab === k}">${n} ${listWords(k).length}</button>`).join('')}</div>
+  ${list.length ? `
+  <div class="btn-row"><button class="btn primary" type="button" data-act="listQuiz">練習這 ${list.length} 個字</button><button class="btn" type="button" data-act="listCards">看字卡</button><button class="btn" type="button" data-act="copyList">複製清單</button></div>
+  ${listTab !== 'fav' ? `<div class="chips">${[['recent', '最近答錯'], ['often', '最常答錯']].map(([k, n]) => `<button class="chip" type="button" data-act="listSort" data-v="${k}" aria-pressed="${listSort === k}">${n}</button>`).join('')}</div>` : ''}
+  <div class="wlist">${list.map(w => wordRow(w, meta(w))).join('')}</div>` : `<p class="empty">${emptyMsg}</p>`}`;
+}
+
+function vMe() {
+  const t = today();
+  let tq = 0, tc = 0, days = 0;
+  for (const k in S.days) { const r = S.days[k]; tq += r.q || 0; tc += r.c || 0; if (r.q || r.f) days++; }
+  const L = levelCounts(W);
+  const bars = []; let mx = 1;
+  for (let k = 13; k >= 0; k--) { const r = S.days[dkey(t - k)] || {}; bars.push({ n: t - k, q: r.q || 0 }); mx = Math.max(mx, r.q || 0); }
+  const maxI = bars.reduce((b, x, i) => x.q > bars[b].q ? i : b, 0);
+  const chart = `<div class="bars" role="img" aria-label="近 14 天每日答題數">${bars.map((b, i) => { const h = Math.round(b.q / mx * 100); return `<div class="b ${b.q ? '' : 'zero'} ${(i === 13 || (i === maxI && b.q)) && b.q ? 'lab' : ''}" style="--h:${h}%" tabindex="0" title="${md(b.n)}：${b.q} 題"><em>${b.q}</em><i style="height:${h}%"></i></div>`; }).join('')}</div>
+    <div class="bars-x">${bars.map((b, i) => `<span>${i % 2 === 1 ? md(b.n) : ''}</span>`).join('')}</div>`;
+  const heat = SECS.map(sec => `<div class="heat-row"><span>${sec.key} ${esc(sec.name)}</span><div class="heat-cells">${sec.cards.map(no => { const c = CARDS[no - 1], f = c.words.filter(w => lvl(w) >= 2).length / c.words.length; const h = f === 0 ? 0 : f < .25 ? 1 : f < .5 ? 2 : f < .75 ? 3 : 4; return `<a class="H${h} ${h >= 3 ? 'hi' : ''}" href="#card-${no}" title="第 ${no} 組 ${esc(c.topic)}：熟悉以上 ${Math.round(f * 100)}%">${no}</a>`; }).join('')}</div></div>`).join('');
+  const modes = Object.keys(TYPES).filter(k => S.modes[k] && S.modes[k].q).map(k => `<div><span>${TYPES[k].name}</span><b>${Math.round(S.modes[k].c / S.modes[k].q * 100)}%<span class="muted">（${S.modes[k].c}/${S.modes[k].q}）</span></b></div>`).join('');
+  const often = W.filter(w => S.w[w.w] && S.w[w.w].x > 0).sort((a, b) => S.w[b.w].x - S.w[a.w].x).slice(0, 8);
+  const sel = (k, opts) => `<select data-set="${k}" id="set-${k}">${opts.map(([v, n]) => `<option value="${v}" ${String(S.set[k]) === String(v) ? 'selected' : ''}>${n}</option>`).join('')}</select>`;
+  const sw = (k, label) => `<label class="switch"><input type="checkbox" data-set="${k}" id="set-${k}" ${S.set[k] ? 'checked' : ''} aria-label="${label}"><span></span></label>`;
+  const row = (b, s, ctl) => `<div class="set-row"><div><b>${b}</b>${s ? `<small>${s}</small>` : ''}</div>${ctl}</div>`;
+  return `<header class="top"><div><p class="eyebrow">學習紀錄</p><h1>我的進度</h1></div></header>
+  <section class="tiles">
+    <div class="tile"><b>${streak()}</b><span>連續學習天數</span></div>
+    <div class="tile"><b>${tq}</b><span>累計答題</span></div>
+    <div class="tile"><b>${tq ? Math.round(tc / tq * 100) + '%' : '—'}</b><span>整體正確率</span></div>
+    <div class="tile"><b>${L[2] + L[3]}</b><span>熟悉以上的字</span></div>
+  </section>
+  <section class="card"><div class="sec-h"><h2>近 14 天答題數</h2><span class="muted">學習 ${days} 天</span></div>${chart}</section>
+  <section class="card"><div class="sec-h"><h2>60 組熟悉度</h2><span class="muted">顏色越深，熟悉的字越多</span></div><div class="heat">${heat}</div>
+    <div class="legend"><span><i class="H0"></i>0%</span><span><i class="H1"></i>未滿 25%</span><span><i class="H2"></i>25–49%</span><span><i class="H3"></i>50–74%</span><span><i class="H4"></i>75% 以上</span></div></section>
+  <section class="card"><div class="sec-h"><h2>1800 字掌握度</h2></div>${mbar(L)}${legend(L)}
+    <p class="muted" style="font-size:.8rem;margin-top:10px">答對一次升一級，同一天只升一次；間隔 1、2、4、7、15、30 天再考。答錯回到「學習中」，並收進錯題本。</p></section>
+  ${modes ? `<section class="card"><div class="sec-h"><h2>各題型正確率</h2></div><div class="kv">${modes}</div></section>` : ''}
+  ${often.length ? `<section class="card"><div class="sec-h"><h2>最常答錯</h2></div><div class="wlist">${often.map(w => wordRow(w, `錯 ${S.w[w.w].x} 次`)).join('')}</div></section>` : ''}
+  <section class="card"><div class="sec-h"><h2>設定</h2></div><div class="set-list">
+    ${row('每日目標', '首頁圓環的題數', sel('goal', [10, 20, 30, 50, 80, 100].map(v => [v, `${v} 題`])))}
+    ${row('每次學新字', '「學新字」一次幾個', sel('newN', [5, 10, 15, 20, 30].map(v => [v, `${v} 個`])))}
+    ${row('每輪複習上限', '「今日複習」一次最多幾個字', sel('reviewN', [20, 30, 50, 100].map(v => [v, `${v} 個`])))}
+    ${row('錯題本自動移出', '答錯後，在幾個不同的日子答對就移出', sel('grad', [[1, '答對 1 天'], [2, '答對 2 天'], [3, '答對 3 天'], [0, '不自動移出']]))}
+    ${TTS.ok ? row('發音', '使用裝置內建的英文語音', sw('sound', '發音')) + row('答題後自動念出單字', '', sw('autoSay', '答題後自動念出單字')) + row('口音', '', sel('accent', [['en-US', '美式'], ['en-GB', '英式']])) + row('語速', '', sel('rate', [[0.7, '慢'], [0.9, '稍慢'], [1, '正常']])) : row('發音', '這個瀏覽器不支援語音，聽音題型無法使用', '')}
+    ${row('答對自動下一題', '答對後 1 秒自動換題', sw('autoNext', '答對自動下一題'))}
+    ${row('綜合練習加入拼寫題', '混入拼字和搭配詞填空', sw('mixTyping', '綜合練習加入拼寫題'))}
+    ${row('字卡先看中文', '正面顯示中文，翻面看英文', sw('zhFirst', '字卡先看中文'))}
+    ${ENV !== 'artifact' ? row('外觀', '', sel('theme', [['auto', '跟隨系統'], ['light', '淺色'], ['dark', '深色']])) : ''}
+    ${row('字體大小', '', sel('fs', [['m', '標準'], ['l', '大'], ['xl', '特大']]))}
+    ${row('學測日期', '首頁倒數用', `<input type="date" data-set="exam" id="set-exam" value="${esc(S.set.exam)}">`)}
+  </div></section>
+  <section class="card"><div class="sec-h"><h2>備份與換裝置</h2></div>
+    <p class="muted" style="font-size:.85rem;margin-bottom:12px">紀錄只存在這個瀏覽器。換手機、換瀏覽器或清除瀏覽資料前，先備份；到新裝置打開網站後匯入。</p>
+    <div class="btn-row">${ENV !== 'artifact' ? '<button class="btn" type="button" data-act="exportFile">下載備份檔</button>' : ''}<button class="btn" type="button" data-act="exportCode">複製備份碼</button></div>
+    <div class="btn-row" style="margin-top:10px"><label class="btn" for="importFile">匯入備份檔<input type="file" id="importFile" accept=".json,.txt,application/json,text/plain" class="sr"></label><button class="btn" type="button" data-act="importCode">貼上備份碼</button></div>
+    <div class="btn-row" style="margin-top:10px"><button class="btn danger" type="button" data-act="reset">清除所有紀錄</button></div>
+  </section>
+  <section class="card about"><div class="sec-h"><h2 style="color:var(--ink)">關於</h2><span class="num">版本 ${esc(window.APP_VER || '')}</span></div>
+    <p>單字：大學入學考試中心《高中英文參考詞彙表》第 3–5 級，依 83–115 年學測與 91–110 年指考的出現情形挑出 1800 字，分 60 組。</p>
+    <p>歷屆詞彙題與考題例句：大學入學考試中心 92–115 學年度學測、93–110 學年度指考英文考科，著作權屬大考中心，僅供非營利學習使用。原創克漏字為本站自編。</p>
+    <p>作答紀錄只存在你的裝置，不會上傳。</p>
+  </section>`;
+}
+
+const VIEWS = { home: vHome, practice: vPractice, words: vWords, wrong: vWrong, me: vMe };
+function render() {
+  const el = $('#view');
+  el.innerHTML = view === 'card' ? vCard(cardNo) : VIEWS[view]();
+  const tab = view === 'card' ? 'words' : view;
+  $$('.tabs a').forEach(a => { if (a.dataset.tab === tab) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
+}
+function route() {
+  const h = (location.hash || '').replace(/^#/, '');
+  const m = /^card-(\d+)$/.exec(h);
+  if (m) { view = 'card'; cardNo = Math.min(CARDS.length, Math.max(1, +m[1])); }
+  else view = VIEWS[h] ? h : 'home';
+  render();
+  window.scrollTo(0, 0);
+}
+function go(v) { if (location.hash === '#' + v) route(); else location.hash = v; }
+
+/* ================= 練習（選擇題、拼寫） ================= */
+let Q = null, OV = null, autoT = 0;
+function openOverlay(kind) { OV = kind; $('#quiz').hidden = false; document.body.style.overflow = 'hidden'; $('#quiz').scrollTop = 0; }
+function closeOverlay() {
+  OV = null; Q = null; F = null; clearInterval(mockTimer); clearTimeout(autoT); TTS.stop();
+  if (M && !M.done) M = null;
+  $('#quiz').hidden = true; document.body.style.overflow = ''; render();
+}
+function startQs(qs, title, mode, words) {
+  if (!qs.length) { toast('這個範圍沒有可出的題目'); return; }
+  Q = { title, mode, qs, i: 0, n: 0, c: 0, wrong: [], t0: Date.now(), a: null, words: words || [...new Set(qs.map(q => q.wi))] };
+  S.sess = Q; save(); openOverlay('quiz'); renderQ();
+}
+function startQuiz(words, title, mode, count) {
+  let qs;
+  if (mode === 'past') {
+    qs = [];
+    words.forEach(w => shuffle(PAST_BY.get(w.i) || []).forEach(p => qs.push(makeQ('past', w, p))));
+    qs = qs.slice(0, count || qs.length);
+  } else qs = words.map(w => makeQ(mode === 'mix' ? mixType(w) : mode, w));
+  startQs(qs, title, mode, words.map(w => w.i));
+}
+function headerQ() {
+  $('#qmode').textContent = Q.title;
+  $('#qprog').textContent = `${Math.min(Q.i + 1, Q.qs.length)} / ${Q.qs.length}`;
+  $('#qscore').innerHTML = `<span class="ok">✓ ${Q.c}</span>　<span class="no">✗ ${Q.n - Q.c}</span>`;
+  $('#qfill').style.width = `${(Q.i + (Q.a ? 1 : 0)) / Q.qs.length * 100}%`;
+}
+function collQ(q, filled) { return esc(q.k).replace(/\{([^}]+)\}/, (m, a) => filled ? `<mark>${a}</mark>` : `<span class="pattern" id="pat">${patHTML(a, q.h)}</span>`); }
+function renderQ() {
+  const q = Q.qs[Q.i], w = W[q.wi];
+  Q.a = null; headerQ();
+  let h = '';
+  if (q.retry) h += '<p class="kicker" style="color:var(--rose-ink)">剛才答錯的題目，再試一次（不計分）</p>';
+  switch (q.t) {
+    case 'e2c': h += `<div class="prompt"><p class="kicker">選出正確的中文意思</p><div class="hw">${esc(w.w)}${sayBtn(w.say)}</div><p class="pos">${esc(w.p)}</p></div>`; break;
+    case 'c2e': h += `<div class="prompt"><p class="kicker">選出正確的英文單字</p><div class="zhq">${esc(w.zh)}</div><p class="pos">${esc(w.p)}</p></div>`; break;
+    case 'listen': h += `<div class="prompt"><p class="kicker">聽發音，選出正確的意思</p><button class="play" type="button" data-act="say" data-text="${esc(w.say)}" aria-label="播放發音">${ICON.speak}</button><p class="muted" style="font-size:.85rem">沒聽清楚可以再按一次</p></div>`; break;
+    case 'cloze': h += `<p class="kicker">選出最適當的選項・原創題</p><p class="stem">${blankStem(ORIG.get(w.i).s)}</p>`; break;
+    case 'past': { const p = PAST[q.pid]; h += `<p class="kicker">歷屆詞彙題・${esc(p.src)} 第 ${p.no} 題</p><p class="stem">${pastBlank(p)}</p>`; break; }
+    case 'coll': h += `<div class="prompt"><p class="kicker">填入常見搭配裡缺少的字</p><div class="colloc-q">${collQ(q)}</div><p><span class="pos">${esc(w.p)}</span>　${esc(w.zh)}</p></div>`; break;
+    case 'spell': h += `<div class="prompt"><p class="kicker">拼出這個英文單字</p><div class="zhq">${esc(w.zh)}</div><p class="pos">${esc(w.p)}</p><p class="pattern" id="pat">${patHTML(w.forms[0], q.h)}</p></div>`; break;
+  }
+  if (q.opts) {
+    const en = q.t !== 'e2c' && q.t !== 'listen';
+    h += `<div class="opts" role="group" aria-label="選項">${q.opts.map((o, j) => `<button class="opt ${en ? 'en' : ''}" type="button" data-act="pick" data-j="${j}"><span class="key">${'ABCD'[j]}</span><span class="t">${esc(o.t)}</span></button>`).join('')}</div>`;
+  } else {
+    h += `<form class="typing" data-form="type" autocomplete="off"><input id="typeIn" type="text" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="done" aria-label="輸入答案">
+      <div class="btn-row" id="typeBtns"><button type="button" class="btn" data-act="hint">提示一個字母</button><button type="button" class="btn" data-act="giveup">不會，看答案</button><button type="submit" class="btn primary">送出</button></div></form>`;
+  }
+  h += '<div id="fb"></div>';
+  $('#qbody').innerHTML = h;
+  $('#quiz').scrollTop = 0;
+  if (q.t === 'listen') setTimeout(() => TTS.say(w.say), 250);
+  if (!q.opts) setTimeout(() => { const i = $('#typeIn'); if (i) i.focus({ preventScroll: true }); }, 60);
+}
+function pick(j) {
+  if (!Q || Q.a || OV !== 'quiz') return;
+  const q = Q.qs[Q.i]; if (!q.opts || !q.opts[j]) return;
+  const ok = !!q.opts[j].ok;
+  Q.a = { j, ok };
+  $$('#qbody .opt').forEach((b, k) => { b.disabled = true; b.classList.add(q.opts[k].ok ? 'ok' : k === j ? 'no' : 'dim'); });
+  afterAnswer(q, ok, {});
+}
+function submitTyping(giveup) {
+  if (!Q || Q.a || OV !== 'quiz') return;
+  const q = Q.qs[Q.i], inp = $('#typeIn'); if (!inp || q.opts) return;
+  const v = norm(inp.value);
+  if (!giveup && !v) { inp.focus(); return; }
+  const ok = !giveup && q.acc.includes(v);
+  Q.a = { v: inp.value.trim(), ok };
+  inp.readOnly = true; inp.classList.add(ok ? 'ok' : 'no');
+  if (giveup) inp.value = '';
+  $('#typeBtns').hidden = true;
+  const pat = $('#pat');
+  if (pat) pat.innerHTML = `<b>${esc(q.t === 'coll' ? q.k.match(/\{([^}]+)\}/)[1] : W[q.wi].forms[0])}</b>`;
+  afterAnswer(q, ok, { hint: ok && q.h > 1 });
+}
+function hint() {
+  const q = Q && Q.qs[Q.i]; if (!q || q.opts || Q.a) return;
+  const ans = q.t === 'coll' ? q.k.match(/\{([^}]+)\}/)[1] : W[q.wi].forms[0];
+  if (q.h >= ans.length - 1) { toast('已經是最後一個提示了'); return; }
+  q.h++;
+  $('#pat').innerHTML = patHTML(ans, q.h);
+  const inp = $('#typeIn'); if (inp) inp.focus({ preventScroll: true });
+}
+function afterAnswer(q, ok, how) {
+  if (!q.retry) {
+    Q.n++; if (ok) Q.c++; else Q.wrong.push(q.wi);
+    record(W[q.wi], ok, q.t, how);
+    if (!ok) Q.qs.splice(Math.min(Q.i + 4, Q.qs.length), 0, retryOf(q));
+  }
+  S.sess = Q; save(); headerQ();
+  showFb(q, ok, how);
+  if (q.t !== 'listen' && S.set.autoSay) TTS.say(W[q.wi].say);
+  clearTimeout(autoT);
+  if (ok && S.set.autoNext) autoT = setTimeout(() => { if (OV === 'quiz' && Q && Q.a) nextQ(); }, 1100);
+}
+function optList(q, pj) {
+  const zhOpt = q.t === 'e2c' || q.t === 'listen';
+  return `<div class="optlist">${q.opts.map((o, j) => {
+    const x = o.wi >= 0 ? W[o.wi] : null, picked = pj === j;
+    const cls = o.ok ? 'okc' : picked ? 'noc' : '';
+    const label = zhOpt ? (x ? x.w : '') : o.t;
+    const mean = x ? (zhOpt ? x.zh : (norm(label) !== x.w.toLowerCase() && !x.forms.includes(norm(label)) ? `${x.w}：${x.zh}` : x.zh)) : '—';
+    return `<div class="${cls}"><span>${o.ok ? '✓' : picked ? '✗' : ''}</span><span class="e">${esc(label)}</span><span class="m">${esc(mean)}</span></div>`;
+  }).join('')}</div>`;
+}
+function showFb(q, ok, how) {
+  const w = W[q.wi];
+  let h = `<div class="fb ${ok ? 'ok' : 'no'}">
+    <div class="fb-h"><b>${ok ? (how.hint ? '答對了（有用提示）' : '答對了') : '答錯了'}</b>${q.retry ? '<span class="tag">補練不計分</span>' : ''}</div>
+    <div class="fb-word"><button class="w" type="button" data-act="word" data-wi="${w.i}">${esc(w.w)}</button><span class="pos">${esc(w.p)}</span><span class="z">${esc(w.zh)}</span><span class="tools">${sayBtn(w.say, 'icon-btn')}${starBtn(w)}</span></div>
+    <div class="colls">${w.k.map(k => `<span>${esc(k.replace(/[{}]/g, ''))}</span>`).join('')}</div>`;
+  const pj = Q.a ? Q.a.j : -1;
+  if (q.t === 'cloze') { const o = ORIG.get(w.i); h += `<p class="sent">${fillStem(o.s)}</p><p class="zh-tr">${esc(o.zh)}</p>${optList(q, pj)}`; }
+  else if (q.t === 'past') { const p = PAST[q.pid]; h += `<p class="sent">${pastFill(p)}</p><p class="src">出處：大考中心 ${esc(p.src)}英文考科 第 ${p.no} 題${p.der ? `；答案 ${esc(p.opts[p.ans])} 是 ${esc(w.w)} 的衍生字` : ''}</p>${optList(q, pj)}`; }
+  else {
+    if (q.opts) h += optList(q, pj);
+    if (q.t === 'coll') h += `<p class="sent">${collQ(q, true)}</p>`;
+    if (!q.opts && !ok && Q.a.v) h += `<p class="diff">你的答案：<del>${esc(Q.a.v)}</del></p>`;
+    if (q.t === 'spell' && w.forms.length > 1) h += `<p class="muted" style="font-size:.85rem">寫成 ${w.forms.map(esc).join(' 或 ')} 都算對</p>`;
+    if (w.ex) h += exHTML(w.ex);
+  }
+  h += `<div class="fb-actions">${ok && !q.retry && lvl(w) < 3 ? `<button class="btn" type="button" data-act="easy" data-wi="${w.i}">太簡單，標為精熟</button>` : ''}<button class="btn primary" type="button" data-act="next" id="nextBtn">${Q.i + 1 >= Q.qs.length ? '看結果' : '下一題'}</button></div></div>`;
+  $('#fb').innerHTML = h;
+  setTimeout(() => { const f = $('#fb .fb'); if (f) f.scrollIntoView({ block: 'nearest', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }); if (q.opts) { const b = $('#nextBtn'); if (b) b.focus({ preventScroll: true }); } }, 40);
+}
+function nextQ() {
+  if (!Q) return;
+  clearTimeout(autoT); TTS.stop();
+  Q.i++;
+  if (Q.i >= Q.qs.length) return endQuiz();
+  Q.a = null; S.sess = Q; save(); renderQ();
+}
+let lastQ = null;
+function endQuiz() {
+  const q = Q; S.sess = null; save(); lastQ = q;
+  const pct = q.n ? Math.round(q.c / q.n * 100) : 0, secs = Math.round((Date.now() - q.t0) / 1000);
+  const wrongWs = [...new Set(q.wrong)].map(i => W[i]);
+  $('#qmode').textContent = q.title; $('#qprog').textContent = '完成'; $('#qfill').style.width = '100%';
+  $('#qscore').innerHTML = '';
+  $('#qbody').innerHTML = `<div class="summary"><p class="kicker">${esc(q.title)}・${q.n} 題</p><div class="score-big">${q.c}<small> / ${q.n}</small></div><p class="muted">正確率 ${pct}%・用時 ${fmtTime(secs)}</p></div>
+    ${wrongWs.length ? `<section class="card"><div class="sec-h"><h2>這次答錯的字</h2><span class="muted">已收進錯題本</span></div><div class="wlist">${wrongWs.map(w => wordRow(w)).join('')}</div></section>` : '<p class="empty">全部答對。</p>'}
+    <div class="btn-row">${wrongWs.length ? `<button class="btn primary" type="button" data-act="retryWrong">再練錯的 ${wrongWs.length} 個字</button>` : ''}<button class="btn" type="button" data-act="again">同樣的字再一輪</button></div>
+    <div class="btn-row"><button class="btn" type="button" data-act="copyScore">複製成績</button><button class="btn" type="button" data-act="close">完成</button></div>`;
+  $('#quiz').scrollTop = 0;
+}
+
+/* ================= 字卡 ================= */
+let F = null;
+function startCards(words, title, then) {
+  if (!words.length) { toast('沒有可以看的字卡'); return; }
+  F = { title, list: words.map(w => w.i), i: 0, flip: false, res: {}, then };
+  openOverlay('cards'); renderF();
+}
+function renderF() {
+  $('#qmode').textContent = F.title; $('#qscore').innerHTML = '';
+  if (F.i >= F.list.length) return cardsDone();
+  $('#qprog').textContent = `${F.i + 1} / ${F.list.length}`;
+  $('#qfill').style.width = `${F.i / F.list.length * 100}%`;
+  const w = W[F.list[F.i]], zf = S.set.zhFirst, o = ORIG.get(w.i);
+  const front = zf ? `<div class="zhq">${esc(w.zh)}</div><p class="pos">${esc(w.p)}</p>` : `<div class="hw">${esc(w.w)}</div><p class="pos">${esc(w.p)}</p>${sayBtn(w.say)}`;
+  const back = `<div class="top-line"><span class="hw" style="font-size:2rem">${esc(w.w)}</span>${sayBtn(w.say)}${starBtn(w)}</div>
+    <p><span class="pos">${esc(w.p)}</span>　<b>${esc(w.zh)}</b></p>
+    <div class="colls">${w.k.map(k => `<span>${esc(k.replace(/[{}]/g, ''))}</span>`).join('')}</div>
+    ${o ? `<p class="sent">${fillStem(o.s)}</p><p class="zh-tr">${esc(o.zh)}</p>` : ''}${exHTML(w.ex)}
+    <p class="src">學測出現 ${w.gs} 屆（近十年 ${w.g10} 屆）・指考 ${w.as} 屆・第 ${w.lv} 級</p>`;
+  const r = F.res[w.i];
+  $('#qbody').innerHTML = `${F.flip ? `<div class="fcard back">${back}</div>` : `<div class="fcard" data-act="flip" role="button" tabindex="0" aria-label="翻面">${front}<span class="hint">點一下翻面</span></div>`}
+    <div class="rate" role="group" aria-label="評分">
+      <button class="r1" type="button" data-act="rate" data-r="1" aria-pressed="${r === 1}">還不熟<small>列入今天複習</small></button>
+      <button class="r2" type="button" data-act="rate" data-r="2" aria-pressed="${r === 2}">記住了<small>之後用測驗確認</small></button>
+      <button class="r3" type="button" data-act="rate" data-r="3" aria-pressed="${r === 3}">太簡單<small>標為精熟</small></button></div>
+    <div class="fnav"><button class="btn small ghost" type="button" data-act="fprev" ${F.i ? '' : 'disabled'}>${ICON.left}上一張</button><button class="btn small ghost" type="button" data-act="fnext">下一張${ICON.right}</button></div>`;
+  $('#quiz').scrollTop = 0;
+  if (!F.flip && !zf && S.set.autoSay) TTS.say(w.say);
+}
+function flip() { if (!F || F.i >= F.list.length) return; F.flip = !F.flip; renderF(); if (F.flip && S.set.zhFirst && S.set.autoSay) TTS.say(W[F.list[F.i]].say); }
+function rate(r) { if (!F || F.i >= F.list.length) return; const w = W[F.list[F.i]]; rateCard(w, r); F.res[w.i] = r; save(); F.i++; F.flip = false; renderF(); }
+function cardsDone() {
+  const ws = F.list.map(i => W[i]);
+  const n1 = ws.filter(w => F.res[w.i] === 1), n3 = ws.filter(w => F.res[w.i] === 3);
+  const test = ws.filter(w => F.res[w.i] !== 3);
+  $('#qprog').textContent = '完成'; $('#qfill').style.width = '100%';
+  $('#qbody').innerHTML = `<div class="summary"><p class="kicker">${esc(F.title)}</p><div class="score-big">${ws.length}<small> 張</small></div>
+    <p class="muted">還不熟 ${n1.length}・記住了 ${ws.length - n1.length - n3.length}・太簡單 ${n3.length}</p></div>
+    <div class="btn-row">${test.length ? `<button class="btn primary" type="button" data-act="cardsTest">${F.then === 'quiz' ? '開始小測驗' : '測驗這些字'}（${test.length} 題）</button>` : ''}${n1.length ? `<button class="btn" type="button" data-act="cardsWeak">再看還不熟的 ${n1.length} 張</button>` : ''}</div>
+    <div class="btn-row"><button class="btn" type="button" data-act="close">完成</button></div>`;
+}
+
+/* ================= 模擬考 ================= */
+let M = null, mockTimer = 0;
+function startMock(list, n, src, timed) {
+  const qs = [];
+  for (const w of shuffle(list)) {
+    if (qs.length >= n) break;
+    const can = [];
+    if (src !== 'past' && ORIG.has(w.i)) can.push('cloze');
+    if (src !== 'orig' && PAST_BY.has(w.i)) can.push('past');
+    if (can.length) qs.push(makeQ(pickOne(can), w));
+  }
+  if (!qs.length) { toast('這個範圍沒有可出的模擬考題'); return; }
+  M = { qs, pick: qs.map(() => -1), i: 0, t0: Date.now(), limit: timed ? qs.length * 60 : 0, done: false };
+  openOverlay('mock'); renderM();
+  clearInterval(mockTimer); mockTimer = setInterval(tickM, 1000);
+}
+function mockLeft() { return M.limit ? M.limit - Math.floor((Date.now() - M.t0) / 1000) : null; }
+function tickM() {
+  if (!M || M.done || OV !== 'mock') { clearInterval(mockTimer); return; }
+  const left = mockLeft(), el = $('#qscore');
+  if (left == null) { if (el) el.innerHTML = `<span class="mtime">${fmtClock(Math.floor((Date.now() - M.t0) / 1000))}</span>`; return; }
+  if (el) el.innerHTML = `<span class="mtime ${left <= 60 ? 'warn' : ''}">剩 ${fmtClock(Math.max(0, left))}</span>`;
+  if (left <= 0) { toast('時間到，自動交卷'); gradeMock(); }
+}
+const fmtClock = s => `${Math.floor(s / 60)}:${pad2(s % 60)}`;
+function renderM() {
+  if (M.done) return renderMockResult();
+  const q = M.qs[M.i], n = M.qs.length;
+  $('#qmode').textContent = '模擬考・詞彙題'; $('#qprog').textContent = `${M.i + 1} / ${n}`;
+  $('#qfill').style.width = `${M.pick.filter(x => x >= 0).length / n * 100}%`;
+  const stem = q.t === 'cloze' ? blankStem(ORIG.get(q.wi).s) : pastBlank(PAST[q.pid]);
+  const src = q.t === 'past' ? `${PAST[q.pid].src} 第 ${PAST[q.pid].no} 題` : '原創題';
+  $('#qbody').innerHTML = `<p class="kicker">第 ${M.i + 1} 題・${esc(src)}</p><p class="stem">${stem}</p>
+    <div class="opts" role="group" aria-label="選項">${q.opts.map((o, j) => `<button class="opt en ${M.pick[M.i] === j ? 'sel' : ''}" type="button" data-act="mpick" data-j="${j}" aria-pressed="${M.pick[M.i] === j}"><span class="key">${'ABCD'[j]}</span><span class="t">${esc(o.t)}</span></button>`).join('')}</div>
+    <div class="fnav"><button class="btn small" type="button" data-act="mprev" ${M.i ? '' : 'disabled'}>${ICON.left}上一題</button>${M.i < n - 1 ? `<button class="btn small" type="button" data-act="mnext">下一題${ICON.right}</button>` : '<button class="btn small primary" type="button" data-act="msubmit">交卷</button>'}</div>
+    <section class="card"><div class="sec-h"><h2>作答狀況</h2><span class="muted">已答 ${M.pick.filter(x => x >= 0).length} / ${n}</span></div>
+      <div class="palette">${M.qs.map((x, k) => `<button type="button" class="${M.pick[k] >= 0 ? 'done' : ''} ${k === M.i ? 'cur' : ''}" data-act="mgo" data-k="${k}" aria-label="第 ${k + 1} 題">${k + 1}</button>`).join('')}</div>
+      <div class="btn-row" style="margin-top:12px"><button class="btn primary" type="button" data-act="msubmit">交卷</button></div></section>`;
+  tickM();
+}
+async function submitMock() {
+  const left = M.pick.filter(x => x < 0).length;
+  if (!await ask(left ? `還有 ${left} 題沒作答，確定交卷？` : '確定交卷？', '交卷', '再檢查')) return;
+  gradeMock();
+}
+function gradeMock() {
+  if (!M || M.done) return;
+  clearInterval(mockTimer);
+  M.done = true; M.t1 = Date.now();
+  M.ok = M.qs.map((q, k) => M.pick[k] >= 0 && !!q.opts[M.pick[k]].ok);
+  M.qs.forEach((q, k) => record(W[q.wi], M.ok[k], q.t));
+  save(); renderMockResult();
+}
+function renderMockResult() {
+  const n = M.qs.length, c = M.ok.filter(Boolean).length, secs = Math.round((M.t1 - M.t0) / 1000);
+  $('#qmode').textContent = '模擬考・成績'; $('#qprog').textContent = `${c} / ${n}`; $('#qscore').innerHTML = ''; $('#qfill').style.width = '100%';
+  const items = M.qs.map((q, k) => {
+    const w = W[q.wi], p = q.t === 'past' ? PAST[q.pid] : null, o = q.t === 'cloze' ? ORIG.get(q.wi) : null;
+    const mine = M.pick[k] >= 0 ? q.opts[M.pick[k]].t : '未作答', right = q.opts.find(x => x.ok).t;
+    const ol = optList(q, M.pick[k]);
+    return `<details id="mr-${k}" ${M.ok[k] ? '' : 'open'}><summary><span class="mk ${M.ok[k] ? 'okc' : 'noc'}">${M.ok[k] ? '✓' : '✗'}</span><span>第 ${k + 1} 題　<span class="en">${esc(right)}</span>${M.ok[k] ? '' : `　<span class="muted">你選 ${esc(mine)}</span>`}</span></summary>
+      <div class="body"><p class="sent">${p ? pastFill(p) : fillStem(o.s)}</p>${o ? `<p class="zh-tr">${esc(o.zh)}</p>` : `<p class="src">出處：大考中心 ${esc(p.src)}英文考科 第 ${p.no} 題</p>`}${ol}
+      <div class="fb-word"><button class="w" type="button" data-act="word" data-wi="${w.i}">${esc(w.w)}</button><span class="pos">${esc(w.p)}</span><span class="z">${esc(w.zh)}</span><span class="tools">${starBtn(w)}</span></div></div></details>`;
+  }).join('');
+  const wrongN = M.ok.filter(x => !x).length;
+  $('#qbody').innerHTML = `<div class="summary"><p class="kicker">模擬考・詞彙題 ${n} 題</p><div class="score-big">${c}<small> / ${n}</small></div><p class="muted">正確率 ${Math.round(c / n * 100)}%・用時 ${fmtTime(secs)}</p></div>
+    <div class="palette">${M.qs.map((x, k) => `<button type="button" class="${M.ok[k] ? 'okp' : 'nop'}" data-act="mjump" data-k="${k}" aria-label="第 ${k + 1} 題">${k + 1}</button>`).join('')}</div>
+    <section class="card review">${items}</section>
+    <div class="btn-row">${wrongN ? `<button class="btn primary" type="button" data-act="mockWrong">練習錯的 ${wrongN} 個字</button>` : ''}<button class="btn" type="button" data-act="mockAgain">再考一回</button><button class="btn" type="button" data-act="close">完成</button></div>`;
+  $('#quiz').scrollTop = 0;
+}
+
+/* ================= 單字詳情 ================= */
+function openWord(wi) {
+  const w = W[wi], s = S.w[w.w], o = ORIG.get(wi), ps = PAST_BY.get(wi) || [], L = lvl(w), t = today();
+  const rec = s && s.n ? `作答 ${s.n} 次，答對 ${s.c} 次${s.x ? `，答錯 ${s.x} 次` : ''}。` : s && s.b ? '看過字卡，還沒有作答紀錄。' : '還沒練過。';
+  const next = s && s.b ? (s.d <= t ? '今天要複習' : `下次複習：${md(s.d)}（${s.d - t} 天後）`) : '';
+  openSheet(`<div class="d-head"><div class="hw" id="sheetTitle">${esc(w.w)}${sayBtn(w.say)}${starBtn(w)}</div>
+      <p><span class="pos">${esc(w.p)}</span>　<b style="font-size:1.1rem">${esc(w.zh)}</b></p></div>
+    <div class="d-tags"><span class="tag blue">第 ${w.lv} 級</span><a class="tag" href="#card-${w.g}" data-act="closeSheet">第 ${w.g} 組・${esc(w.card.topic)}</a><span class="tag ${L === 3 ? 'sage' : L ? 'gold' : ''}">${LVN[L]}</span>${s && s.wb ? '<span class="tag rose">在錯題本</span>' : ''}</div>
+    <div class="d-sec"><h3>常見搭配</h3><div class="colls">${w.k.map(k => `<span>${esc(k.replace(/[{}]/g, ''))}</span>`).join('')}</div></div>
+    ${o ? `<div class="d-sec"><h3>例句（本站原創）</h3><p class="sent">${fillStem(o.s)}${sayBtn(o.s.replace(/[{}]/g, ''), 'icon-btn')}</p><p class="zh-tr">${esc(o.zh)}</p></div>` : ''}
+    ${w.ex && !ps.some(p => w.ex.startsWith(p.src + '：')) ? `<div class="d-sec"><h3>歷屆考題裡的用法</h3>${exHTML(w.ex)}</div>` : ''}
+    ${ps.length ? `<div class="d-sec"><h3>歷屆詞彙題</h3>${ps.map(p => `<p class="sent">${pastFill(p)}</p><p class="src">${esc(p.src)} 第 ${p.no} 題・選項：${p.opts.map(esc).join(' / ')}</p>`).join('')}</div>` : ''}
+    <div class="d-sec"><h3>考試出現情形</h3><p style="font-size:.9rem">學測 ${w.gs}/35 份（近十年 ${w.g10} 份）・指考 ${w.as}/22 份・當過正確答案 ${w.ca} 次・列為選項 ${w.op} 次</p></div>
+    <div class="d-sec"><h3>我的紀錄</h3><p style="font-size:.9rem">${rec}${next ? `<br>${next}` : ''}</p></div>
+    <div class="btn-row"><button class="btn primary" type="button" data-act="wordQuiz" data-wi="${wi}">專練這個字</button>${L < 3 ? `<button class="btn" type="button" data-act="easyWord" data-wi="${wi}">太簡單，標為精熟</button>` : ''}</div>
+    ${s ? `<div class="btn-row">${s.wb ? `<button class="btn small" type="button" data-act="unwrong" data-wi="${wi}">移出錯題本</button>` : ''}<button class="btn small danger" type="button" data-act="wordReset" data-wi="${wi}">重設這個字的紀錄</button></div>` : ''}`);
+}
+
+/* ================= 備份 ================= */
+const backupText = () => JSON.stringify({ app: 'gsat1800', v: 1, at: new Date().toISOString(), data: S });
+async function importData(text) {
+  let o;
+  try { o = JSON.parse(String(text || '').trim()); } catch (e) { toast('讀不懂這份備份，請確認內容完整'); return; }
+  const d = o && o.app === 'gsat1800' && o.data ? o.data : (o && o.w && o.set ? o : null);
+  if (!d) { toast('這不是學測 1800 的備份'); return; }
+  const n = Object.keys(d.w || {}).length;
+  if (!await ask(`要用這份備份（${n} 個字的紀錄）取代目前的進度嗎？`, '取代')) return;
+  S = normalize(d); save(); applyLook(); TTS.pick();
+  if (!$('#sheet').hidden) closeSheet();
+  render(); toast('已匯入備份');
+}
+
+/* ================= 外觀 ================= */
+function applyLook() {
+  if (ENV !== 'artifact') { if (S.set.theme === 'auto') ROOT.removeAttribute('data-theme'); else ROOT.setAttribute('data-theme', S.set.theme); }
+  if (S.set.fs === 'm') ROOT.removeAttribute('data-fs'); else ROOT.setAttribute('data-fs', S.set.fs);
+}
+
+/* ================= 動作 ================= */
+const wOf = el => W[+el.dataset.wi];
+const ACT = {
+  go: el => go(el.dataset.to),
+  goFav: () => { listTab = 'fav'; go('wrong'); },
+  review: () => {
+    const t = today();
+    const due = W.filter(w => isDue(w, t)).sort((a, b) => (isWrong(b) - isWrong(a)) || (S.w[a.w].d - S.w[b.w].d) || (S.w[a.w].b - S.w[b.w].b));
+    if (!due.length) { toast('目前沒有到期的字，先學新字吧'); return; }
+    startQuiz(shuffle(due.slice(0, S.set.reviewN)), '今日複習', 'mix');
+  },
+  learn: () => {
+    const list = W.filter(w => lvl(w) === 0).slice(0, S.set.newN);
+    if (!list.length) { toast('1800 字都學過了，改用今日複習或自訂練習'); return; }
+    startCards(list, '學新字', 'quiz');
+  },
+  mockNow: () => startMock(W, 10, 'mix', true),
+  resume: () => { if (!S.sess) return; Q = S.sess; openOverlay('quiz'); if (Q.a) nextQ(); else renderQ(); },
+  dropResume: () => { S.sess = null; save(); render(); },
+  setMode: el => { S.setup.mode = el.dataset.m; save(); render(); },
+  quickMode: el => {
+    const st = S.setup;
+    st.mode = el.dataset.m;
+    if (!rangeWords(st).some(w => modeHas(st.mode, w))) st.filter = 'all';
+    save(); ACT.startSetup();
+  },
+  opt: el => {
+    const k = el.dataset.k, v = el.dataset.v, st = S.setup;
+    if (k === 'lv') { const n = +v; st.levels = st.levels.includes(n) ? st.levels.filter(x => x !== n) : st.levels.concat(n).sort(); if (!st.levels.length) st.levels = [n]; }
+    else if (k === 'count' || k === 'mockN') st[k] = +v;
+    else if (k === 'mockTimed') st.mockTimed = v === '1';
+    else st[k] = v;
+    save(); render();
+  },
+  pickCards: () => { openSheet(cardPickHTML()); sheetClose = () => { save(); render(); }; },
+  cardToggle: el => { const n = +el.dataset.no, c = S.setup.cards; S.setup.cards = c.includes(n) ? c.filter(x => x !== n) : c.concat(n).sort((a, b) => a - b); if (!S.setup.cards.length) S.setup.cards = [n]; $('#sheetBody').innerHTML = cardPickHTML(); },
+  secToggle: el => { const sec = SECS.find(s => s.key === el.dataset.s), sel = new Set(S.setup.cards), all = sec.cards.every(n => sel.has(n)); sec.cards.forEach(n => all ? sel.delete(n) : sel.add(n)); S.setup.cards = sel.size ? [...sel].sort((a, b) => a - b) : sec.cards.slice(); $('#sheetBody').innerHTML = cardPickHTML(); },
+  cardsAll: el => { S.setup.cards = el.dataset.v === '1' ? CARDS.map(c => c.no) : [1]; $('#sheetBody').innerHTML = cardPickHTML(); },
+  startSetup: () => {
+    const st = S.setup;
+    let list = rangeWords(st).filter(w => modeHas(st.mode, w));
+    if (!list.length) { toast('這個範圍沒有題目，請調整範圍或篩選'); return; }
+    if (st.mode === 'mock') return startMock(list, st.mockN, st.mockSrc, st.mockTimed);
+    list = orderWords(list, st.order);
+    if (st.mode === 'cards') return startCards(list.slice(0, st.count), '字卡');
+    if (st.mode === 'past') return startQuiz(list, TYPES.past.name, 'past', st.count);
+    startQuiz(list.slice(0, st.count), modeName(st.mode), st.mode);
+  },
+  cardQuiz: el => { const c = CARDS[+el.dataset.no - 1]; startQuiz(shuffle(c.words), `第 ${c.no} 組`, 'mix'); },
+  cardFlash: el => { const c = CARDS[+el.dataset.no - 1]; startCards(c.words, `第 ${c.no} 組字卡`); },
+  word: el => openWord(+el.dataset.wi),
+  closeSheet: () => closeSheet(),
+  say: el => TTS.say(el.dataset.text),
+  star: el => {
+    const w = wOf(el); if (S.fav[w.w]) delete S.fav[w.w]; else S.fav[w.w] = today();
+    save();
+    $$(`[data-act="star"][data-wi="${w.i}"]`).forEach(b => { b.classList.toggle('on', isFav(w)); b.setAttribute('aria-pressed', isFav(w)); });
+    toast(isFav(w) ? `已收藏 ${w.w}` : `已取消收藏 ${w.w}`);
+    if (OV == null && $('#sheet').hidden && (view === 'wrong' || view === 'home')) render();
+  },
+  pick: el => pick(+el.dataset.j),
+  hint: () => hint(),
+  giveup: () => submitTyping(true),
+  next: () => nextQ(),
+  easy: el => { markEasy(wOf(el)); save(); toast(`${wOf(el).w} 已標為精熟`); el.remove(); },
+  easyWord: el => { markEasy(wOf(el)); save(); toast(`${wOf(el).w} 已標為精熟`); openWord(+el.dataset.wi); if (OV == null) render(); },
+  unwrong: el => { const s = S.w[wOf(el).w]; if (s) { s.wb = 0; s.gr = today(); } save(); openWord(+el.dataset.wi); if (OV == null) render(); },
+  wordReset: async el => { const w = wOf(el); if (!await ask(`要清除 ${w.w} 的作答紀錄嗎？`, '清除')) return; delete S.w[w.w]; save(); openWord(w.i); if (OV == null) render(); },
+  wordQuiz: el => {
+    const w = wOf(el);
+    const types = ['e2c', 'c2e', 'cloze', 'past', 'coll', 'spell'].filter(t => hasType(t, w));
+    closeSheet();
+    if (OV) { toast('請先完成目前的練習'); return; }
+    startQs(shuffle(types).map(t => makeQ(t, w)), `${w.w} 專練`, 'word', [w.i]);
+  },
+  quit: async () => {
+    if (OV === 'quiz' && Q && Q.i < Q.qs.length) {
+      if (Q.n && !await ask('先離開這次練習？已作答的紀錄都已儲存，之後可以在「今日」接著做。', '離開', '繼續作答')) return;
+    } else if (OV === 'mock' && M && !M.done) {
+      if (!await ask('離開模擬考？這次的作答不會計分。', '離開', '繼續作答')) return;
+    }
+    closeOverlay();
+  },
+  close: () => closeOverlay(),
+  retryWrong: () => { const ws = [...new Set(lastQ.wrong)].map(i => W[i]); startQuiz(shuffle(ws), '錯題再練', 'mix'); },
+  again: () => { const ws = (lastQ.words || []).map(i => W[i]); if (lastQ.mode === 'word') return ACT.wordQuiz({ dataset: { wi: ws[0].i } }); startQuiz(shuffle(ws), lastQ.title, lastQ.mode === 'past' ? 'past' : (TYPES[lastQ.mode] ? lastQ.mode : 'mix')); },
+  copyScore: () => { const q = lastQ; copyText(`學測英文 1800｜${q.title} ${q.n} 題答對 ${q.c} 題（${q.n ? Math.round(q.c / q.n * 100) : 0}%）`, '已複製成績'); },
+  flip: () => flip(),
+  rate: el => rate(+el.dataset.r),
+  fprev: () => { if (F && F.i > 0) { F.i--; F.flip = false; renderF(); } },
+  fnext: () => { if (F) { F.i++; F.flip = false; renderF(); } },
+  cardsTest: () => { const ws = F.list.map(i => W[i]).filter(w => F.res[w.i] !== 3); const title = F.then === 'quiz' ? '新字小測驗' : `${F.title}測驗`; startQuiz(shuffle(ws.length ? ws : F.list.map(i => W[i])), title, 'mix'); },
+  cardsWeak: () => { const ws = F.list.map(i => W[i]).filter(w => F.res[w.i] === 1); startCards(ws, '還不熟的字', F.then); },
+  mpick: el => { if (!M || M.done) return; const j = +el.dataset.j; M.pick[M.i] = M.pick[M.i] === j ? -1 : j; renderM(); },
+  mprev: () => { if (M.i > 0) { M.i--; renderM(); } },
+  mnext: () => { if (M.i < M.qs.length - 1) { M.i++; renderM(); } },
+  mgo: el => { M.i = +el.dataset.k; renderM(); },
+  msubmit: () => submitMock(),
+  mjump: el => { const d = $(`#mr-${el.dataset.k}`); if (d) { d.open = true; d.scrollIntoView({ block: 'start' }); } },
+  mockWrong: () => { const ws = M.qs.filter((q, k) => !M.ok[k]).map(q => W[q.wi]); startQuiz(shuffle(ws), '模擬考錯題', 'mix'); },
+  mockAgain: () => { const st = S.setup; const list = (st.mode === 'mock' ? rangeWords(st) : W); startMock(list.length ? list : W, M.qs.length, st.mode === 'mock' ? st.mockSrc : 'mix', !!M.limit); },
+  listTab: el => { listTab = el.dataset.v; render(); },
+  listSort: el => { listSort = el.dataset.v; render(); },
+  listQuiz: () => { const ws = listWords(listTab); startQuiz(shuffle(ws), listTab === 'fav' ? '收藏練習' : listTab === 'grad' ? '已畢業複習' : '錯題練習', 'mix'); },
+  listCards: () => startCards(listWords(listTab), listTab === 'fav' ? '收藏字卡' : '錯題字卡'),
+  copyList: () => {
+    const ws = listWords(listTab);
+    const name = listTab === 'fav' ? '收藏' : listTab === 'grad' ? '已畢業' : '錯題本';
+    copyText(`學測英文 1800｜${name}（${ws.length} 字）\n` + ws.map(w => { const s = S.w[w.w]; return `${w.w}（${w.p}）${w.zh}${s && s.x ? `｜錯 ${s.x} 次` : ''}`; }).join('\n'), '已複製清單');
+  },
+  exportFile: () => download(`學測1800備份_${dkey()}.json`, backupText()),
+  exportCode: () => copyText(backupText(), '已複製備份碼，請貼到記事本保存'),
+  importCode: () => openSheet(`<h2 id="sheetTitle">貼上備份碼</h2><p class="muted">把之前複製的備份碼整段貼進來。</p><textarea class="copybox" id="pasteBox" placeholder='{"app":"gsat1800",...}'></textarea><div class="btn-row"><button class="btn primary" type="button" data-act="doImport">匯入</button></div>`),
+  doImport: () => importData($('#pasteBox').value),
+  reset: async () => {
+    if (!await ask('要清除所有作答紀錄、錯題本和收藏嗎？清除後無法復原，建議先備份。', '全部清除')) return;
+    const set = S.set; S = fresh(); S.set = set; save(); render(); toast('已清除所有紀錄');
+  },
+};
+
+document.addEventListener('click', e => {
+  const el = e.target.closest('[data-act]');
+  if (!el || el.disabled) return;
+  const fn = ACT[el.dataset.act]; if (!fn) return;
+  if (el.tagName === 'A' && el.dataset.act === 'closeSheet') { closeSheet(); return; }
+  e.preventDefault(); fn(el, e);
+});
+document.addEventListener('submit', e => { if (e.target.matches('[data-form="type"]')) { e.preventDefault(); submitTyping(false); } });
+document.addEventListener('input', e => { if (e.target.id === 'q') { searchQ = e.target.value; const r = $('#results'); if (r) r.innerHTML = searchQ.trim() ? resultsHTML() : sectionsHTML(); } });
+document.addEventListener('change', e => {
+  const el = e.target;
+  if (el.id === 'importFile') { const f = el.files && el.files[0]; if (f) { const r = new FileReader(); r.onload = () => importData(r.result); r.readAsText(f); } el.value = ''; return; }
+  const k = el.dataset && el.dataset.set; if (!k) return;
+  let v = el.type === 'checkbox' ? el.checked : el.value;
+  if (['goal', 'newN', 'grad', 'reviewN', 'rate'].includes(k)) v = +v;
+  if (k === 'exam' && !dnum(v)) return;
+  S.set[k] = v; save(); applyLook();
+  if (k === 'accent') TTS.pick();
+  if (k === 'sound' && !v) TTS.stop();
+  render();
+});
+document.addEventListener('keydown', e => {
+  if (!$('#dialog').hidden) { if (e.key === 'Escape' && dlgDone) dlgDone(false); return; }
+  if (!$('#sheet').hidden) { if (e.key === 'Escape') closeSheet(); return; }
+  if (!OV) return;
+  const tag = e.target.tagName, typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+  if (e.key === 'Escape') { ACT.quit(); return; }
+  const k4 = '1234'.indexOf(e.key) >= 0 ? '1234'.indexOf(e.key) : 'abcd'.indexOf((e.key || '').toLowerCase());
+  const onBtn = e.target.tagName === 'BUTTON' || e.target.tagName === 'A';
+  if (OV === 'quiz' && Q) {
+    if (Q.a) {
+      if (onBtn && (e.key === 'Enter' || e.key === ' ')) return;  // 讓按鈕自己處理，避免連跳兩題
+      if (e.key === 'Enter' || (!typing && (e.key === ' ' || e.key === 'ArrowRight'))) { e.preventDefault(); nextQ(); }
+      return;
+    }
+    if (typing) return;
+    if (k4 >= 0 && e.key.length === 1 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); pick(k4); }
+  } else if (OV === 'cards' && F) {
+    if (F.i >= F.list.length || e.target.tagName === 'BUTTON' && (e.key === 'Enter' || e.key === ' ')) return;
+    if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); flip(); }
+    else if (e.key === 'ArrowRight') ACT.fnext(); else if (e.key === 'ArrowLeft') ACT.fprev();
+    else if ('123'.includes(e.key) && e.key.length === 1) rate(+e.key);
+  } else if (OV === 'mock' && M && !M.done) {
+    if (k4 >= 0 && e.key.length === 1 && !e.metaKey && !e.ctrlKey) { M.pick[M.i] = k4; renderM(); }
+    else if (e.key === 'ArrowRight') ACT.mnext(); else if (e.key === 'ArrowLeft') ACT.mprev();
+  }
+});
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && !OV) render(); });
+window.addEventListener('hashchange', route);
+
+applyLook();
+route();
+if (ENV !== 'artifact' && 'serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
+  window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
+}
+// 給自動測試用
+window.__app = { get S() { return S; }, render, go, openWord, W, ORIG, PAST, PAST_BY, CARDS, ACT, makeQ, pickDistractors, record, rangeWords, startQuiz, startMock, pick, submitTyping, nextQ, rate, get Q() { return Q; }, get M() { return M; }, get F() { return F; }, lvl, levelCounts, searchWords, mixType, clash };
+})();
