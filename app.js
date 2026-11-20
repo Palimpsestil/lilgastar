@@ -70,9 +70,12 @@ const W = DATA.W.map((a, i) => {
   w.card = CARDS[w.g - 1];
   w.card.words.push(w);
   w.bi = zhBigrams(a[2]);
+  w.syn = new Set();
   w.kb = a[3].filter(x => x.includes('{'));
   return w;
 });
+// 近義詞排除（_原始檔/近義詞排除.txt）：中文字面不同但意思相近，不能同時當選項
+(DATA.X || []).forEach(([a, b]) => { if (W[a] && W[b]) { W[a].syn.add(b); W[b].syn.add(a); } });
 const BYPOS = {};
 W.forEach(w => (BYPOS[w.p1] = BYPOS[w.p1] || []).push(w));
 const ORIG = new Map();
@@ -80,6 +83,10 @@ DATA.O.forEach(a => ORIG.set(a[0], { wi: a[0], pos: a[1], s: a[2], ds: a[3], di:
 const PAST = DATA.P.map((a, j) => ({ id: j, wi: a[0], src: a[1], no: a[2], stem: a[3], opts: a[4], ans: a[5], oi: a[6], der: a[7] }));
 const PAST_BY = new Map();
 PAST.forEach(p => { if (!PAST_BY.has(p.wi)) PAST_BY.set(p.wi, []); PAST_BY.get(p.wi).push(p); });
+// 中譯英：每組 2 句；每句 [中文, 參考答案, 其他寫法[], 句型重點[], 關鍵字詞[[中, 英]], 易錯提醒[], 句中的 1800 字 index[]]
+const TR_TH = DATA.TH || {};
+const TR = (DATA.T || []).map(a => ({ id: a[0], th: a[1], title: a[2], s: a[3].map(x => ({ zh: x[0], ref: x[1], alt: x[2], pat: x[3], key: x[4], warn: x[5], wis: x[6] })) }));
+const TR_BY = new Map(TR.map(t => [t.id, t]));
 
 /* ================= 儲存 ================= */
 const KEY = 'gsat1800-v1';
@@ -87,7 +94,7 @@ const DEFAULTS = { goal: 30, newN: 10, grad: 2, sound: true, autoSay: true, acce
   mixTyping: false, zhFirst: false, theme: 'auto', fs: 'm', exam: '2027-01-22', reviewN: 30 };
 const SETUP0 = { mode: 'e2c', cards: CARDS.map(c => c.no), levels: [3, 4, 5], filter: 'all', count: 20, order: 'random',
   mockN: 10, mockSrc: 'mix', mockTimed: true };
-function fresh() { return { app: 'gsat1800', v: 1, w: {}, days: {}, modes: {}, fav: {}, set: { ...DEFAULTS }, setup: { ...SETUP0, cards: SETUP0.cards.slice() }, sess: null, since: dkey() }; }
+function fresh() { return { app: 'gsat1800', v: 1, w: {}, days: {}, modes: {}, fav: {}, set: { ...DEFAULTS }, setup: { ...SETUP0, cards: SETUP0.cards.slice() }, sess: null, tr: { d: {}, a: {} }, since: dkey() }; }
 const HEADS = new Set(W.map(w => w.w));
 const TYPE_KEYS = ['e2c', 'c2e', 'cloze', 'past', 'listen', 'coll', 'spell'];
 const MODE_KEYS = ['e2c', 'c2e', 'cloze', 'mix', 'past', 'mock', 'cards', 'coll', 'spell', 'listen'];
@@ -134,7 +141,12 @@ function normalize(o) {
     if (t.x && !t.lw) t.lw = t.ls || today();
     s.w[k] = t;
   }
-  if (isObj(o.days)) for (const k in o.days) { const r = o.days[k]; if (dnum(k) != null && isObj(r)) s.days[k] = { q: num(r.q), c: num(r.c), f: num(r.f) }; }
+  if (isObj(o.days)) for (const k in o.days) { const r = o.days[k]; if (dnum(k) != null && isObj(r)) { s.days[k] = { q: num(r.q), c: num(r.c), f: num(r.f) }; if (r.t != null) s.days[k].t = num(r.t); } }
+  if (isObj(o.tr)) {
+    // 中譯英：d = 每組最後練習的日子，a = 自己寫的答案（鍵為「組-句」）
+    if (isObj(o.tr.d)) for (const k in o.tr.d) if (TR_BY.has(+k) && String(+k) === k) s.tr.d[k] = num(o.tr.d[k], today());
+    if (isObj(o.tr.a)) for (const k in o.tr.a) { const m = /^(\d+)-([12])$/.exec(k), v = o.tr.a[k]; if (m && TR_BY.has(+m[1]) && typeof v === 'string' && v) s.tr.a[k] = v.slice(0, 2000); }
+  }
   if (isObj(o.modes)) for (const k of TYPE_KEYS) { const r = o.modes[k]; if (isObj(r)) s.modes[k] = { q: num(r.q), c: num(r.c) }; }
   if (isObj(o.fav)) for (const k in o.fav) if (HEADS.has(k) && o.fav[k]) s.fav[k] = num(o.fav[k], today());
   const src = isObj(o.set) ? o.set : {};
@@ -203,7 +215,7 @@ function rateCard(w, r) {
 }
 function streak() {
   let t = today(), n = 0;
-  const act = k => { const r = S.days[dkey(k)]; return r && (r.q || r.f); };
+  const act = k => { const r = S.days[dkey(k)]; return r && (r.q || r.f || r.t); };
   if (!act(t)) t--;
   while (act(t)) { n++; t--; }
   return n;
@@ -259,8 +271,9 @@ const MODES = [
   { id: 'cards', name: '字卡', desc: '翻卡背誦，自己評熟悉度' },
   { id: 'coll', ...TYPES.coll }, { id: 'spell', ...TYPES.spell }, { id: 'listen', ...TYPES.listen },
 ];
-// 三種主要模式：1 英選中、2 中選英、3 原創題
+// 主要模式：1 英選中、2 中選英、3 原創題（單字題，共用練習設定）；4 中譯英（另有自己的頁面 #trans）
 const MAIN_MODES = ['e2c', 'c2e', 'cloze'];
+const TR_MODE = { name: '中譯英', desc: '看中文寫出英文句子，附參考解答' };
 const modeName = m => (MODES.find(x => x.id === m) || {}).name || '練習';
 function hasType(t, w) {
   if (t === 'cloze') return ORIG.has(w.i);
@@ -274,7 +287,7 @@ function modeHas(mode, w) {
   if (mode === 'mock') { const src = S.setup.mockSrc; return (src !== 'past' && ORIG.has(w.i)) || (src !== 'orig' && PAST_BY.has(w.i)); }
   return hasType(mode, w);
 }
-function clash(a, b) { if (a === b) return true; for (const x of a.bi) if (b.bi.has(x)) return true; return false; }
+function clash(a, b) { if (a === b || a.syn.has(b.i)) return true; for (const x of a.bi) if (b.bi.has(x)) return true; return false; }
 function pickDistractors(w, n = 3) {
   const out = [];
   const tryPool = pool => { for (const x of shuffle(pool)) { if (out.length >= n) return; if (x === w || out.includes(x) || (x.g === w.g && x.cat === w.cat) || clash(w, x) || out.some(y => clash(y, x))) continue; out.push(x); } };
@@ -443,8 +456,8 @@ function vHome() {
     <button class="big ${due.length ? '' : 'primary'}" type="button" data-act="learn"><b>學新字</b><span>${fresh0.length ? `從第 ${fresh0[0].g} 組接著學 ${Math.min(S.set.newN, fresh0.length)} 個` : '1800 字都學過了'}</span></button>
   </section>
   <section class="card">
-    <div class="sec-h"><h2>三種練習模式</h2><span class="muted num">${esc(rangeLabel(S.setup).split('：')[0])}・每次 ${S.setup.count} 題</span></div>
-    <div class="modes3 home">${MAIN_MODES.map((id, k) => `<button class="mode main" type="button" data-act="quickMode" data-m="${id}"><span class="mnum">${k + 1}</span><b>${TYPES[id].name}</b><span>${TYPES[id].desc}</span></button>`).join('')}</div>
+    <div class="sec-h"><h2>${TR.length ? '四' : '三'}種練習模式</h2><span class="muted num">${esc(rangeLabel(S.setup).split('：')[0])}・每次 ${S.setup.count} 題</span></div>
+    <div class="modes3 home">${MAIN_MODES.map((id, k) => `<button class="mode main" type="button" data-act="quickMode" data-m="${id}"><span class="mnum">${k + 1}</span><b>${TYPES[id].name}</b><span>${TYPES[id].desc}</span></button>`).join('')}${TR.length ? `<button class="mode main" type="button" data-act="trNext"><span class="mnum">4</span><b>${TR_MODE.name}</b><span>${TR_MODE.desc}</span></button>` : ''}</div>
   </section>
   <section class="quick">
     <button type="button" data-act="go" data-to="wrong"><b class="num">${wrongN}</b>錯題本</button>
@@ -467,8 +480,8 @@ function vPractice() {
   const n = isMock ? Math.min(st.mockN, avail) : st.mode === 'past' ? Math.min(st.count, avail) : Math.min(st.count, avail);
   return `
   <header class="top"><div><p class="eyebrow">自訂練習</p><h1>選題型和範圍</h1></div></header>
-  <section class="opt-group"><span class="opt-label">三種主要模式</span>
-    <div class="modes3">${MODES.filter(m => MAIN_MODES.includes(m.id)).map((m, k) => modeBtn(m, cnt(m.id), st.mode, k + 1)).join('')}</div>
+  <section class="opt-group"><span class="opt-label">${TR.length ? '四' : '三'}種主要模式</span>
+    <div class="modes3">${MODES.filter(m => MAIN_MODES.includes(m.id)).map((m, k) => modeBtn(m, cnt(m.id), st.mode, k + 1)).join('')}${TR.length ? `<button class="mode main" type="button" data-act="go" data-to="trans"><span class="mnum">4</span><b>${TR_MODE.name}</b><span>${TR_MODE.desc}</span><em>已練 ${trDoneN()} / ${TR.length} 組・點了看全部題目</em></button>` : ''}</div>
   </section>
   <section class="opt-group"><span class="opt-label">更多練習</span>
     <div class="modes">${MODES.filter(m => !MAIN_MODES.includes(m.id)).map(m => modeBtn(m, cnt(m.id), st.mode)).join('')}</div>
@@ -572,7 +585,7 @@ function vWrong() {
 function vMe() {
   const t = today();
   let tq = 0, tc = 0, days = 0;
-  for (const k in S.days) { const r = S.days[k]; tq += r.q || 0; tc += r.c || 0; if (r.q || r.f) days++; }
+  for (const k in S.days) { const r = S.days[k]; tq += r.q || 0; tc += r.c || 0; if (r.q || r.f || r.t) days++; }
   const L = levelCounts(W);
   const bars = []; let mx = 1;
   for (let k = 13; k >= 0; k--) { const r = S.days[dkey(t - k)] || {}; bars.push({ n: t - k, q: r.q || 0 }); mx = Math.max(mx, r.q || 0); }
@@ -580,7 +593,9 @@ function vMe() {
   const chart = `<div class="bars" role="img" aria-label="近 14 天每日答題數">${bars.map((b, i) => { const h = Math.round(b.q / mx * 100); return `<div class="b ${b.q ? '' : 'zero'} ${(i === 13 || (i === maxI && b.q)) && b.q ? 'lab' : ''}" style="--h:${h}%" tabindex="0" title="${md(b.n)}：${b.q} 題"><em>${b.q}</em><i style="height:${h}%"></i></div>`; }).join('')}</div>
     <div class="bars-x">${bars.map((b, i) => `<span>${i % 2 === 1 ? md(b.n) : ''}</span>`).join('')}</div>`;
   const heat = SECS.map(sec => `<div class="heat-row"><span>${sec.key} ${esc(sec.name)}</span><div class="heat-cells">${sec.cards.map(no => { const c = CARDS[no - 1], f = c.words.filter(w => lvl(w) >= 2).length / c.words.length; const h = f === 0 ? 0 : f < .25 ? 1 : f < .5 ? 2 : f < .75 ? 3 : 4; return `<a class="H${h} ${h >= 3 ? 'hi' : ''}" href="#card-${no}" title="第 ${no} 組 ${esc(c.topic)}：熟悉以上 ${Math.round(f * 100)}%">${no}</a>`; }).join('')}</div></div>`).join('');
-  const modes = Object.keys(TYPES).filter(k => S.modes[k] && S.modes[k].q).map(k => `<div><span>${TYPES[k].name}</span><b>${Math.round(S.modes[k].c / S.modes[k].q * 100)}%<span class="muted">（${S.modes[k].c}/${S.modes[k].q}）</span></b></div>`).join('');
+  const trN = trDoneN();
+  const modes = Object.keys(TYPES).filter(k => S.modes[k] && S.modes[k].q).map(k => `<div><span>${TYPES[k].name}</span><b>${Math.round(S.modes[k].c / S.modes[k].q * 100)}%<span class="muted">（${S.modes[k].c}/${S.modes[k].q}）</span></b></div>`).join('')
+    + (trN ? `<div><span>${TR_MODE.name}</span><b>已練 ${trN} / ${TR.length} 組</b></div>` : '');
   const often = W.filter(w => S.w[w.w] && S.w[w.w].x > 0).sort((a, b) => S.w[b.w].x - S.w[a.w].x).slice(0, 8);
   const sel = (k, opts) => `<select data-set="${k}" id="set-${k}">${opts.map(([v, n]) => `<option value="${v}" ${String(S.set[k]) === String(v) ? 'selected' : ''}>${n}</option>`).join('')}</select>`;
   const sw = (k, label) => `<label class="switch"><input type="checkbox" data-set="${k}" id="set-${k}" ${S.set[k] ? 'checked' : ''} aria-label="${label}"><span></span></label>`;
@@ -597,7 +612,7 @@ function vMe() {
     <div class="legend"><span><i class="H0"></i>0%</span><span><i class="H1"></i>未滿 25%</span><span><i class="H2"></i>25–49%</span><span><i class="H3"></i>50–74%</span><span><i class="H4"></i>75% 以上</span></div></section>
   <section class="card"><div class="sec-h"><h2>1800 字掌握度</h2></div>${mbar(L)}${legend(L)}
     <p class="muted" style="font-size:.8rem;margin-top:10px">答對一次升一級，同一天只升一次；間隔 1、2、4、7、15、30 天再考。答錯回到「學習中」，並收進錯題本。</p></section>
-  ${modes ? `<section class="card"><div class="sec-h"><h2>各題型正確率</h2></div><div class="kv">${modes}</div></section>` : ''}
+  ${modes ? `<section class="card"><div class="sec-h"><h2>各題型紀錄</h2></div><div class="kv">${modes}</div></section>` : ''}
   ${often.length ? `<section class="card"><div class="sec-h"><h2>最常答錯</h2></div><div class="wlist">${often.map(w => wordRow(w, `錯 ${S.w[w.w].x} 次`)).join('')}</div></section>` : ''}
   <section class="card"><div class="sec-h"><h2>設定</h2></div><div class="set-list">
     ${row('每日目標', '首頁圓環的題數', sel('goal', [10, 20, 30, 50, 80, 100].map(v => [v, `${v} 題`])))}
@@ -621,15 +636,95 @@ function vMe() {
   <section class="card about"><div class="sec-h"><h2 style="color:var(--ink)">關於</h2><span class="num">版本 ${esc(window.APP_VER || '')}</span></div>
     <p>單字：大學入學考試中心《高中英文參考詞彙表》第 3–5 級，依 83–115 年學測與 91–110 年指考的出現情形挑出 1800 字，分 60 組。</p>
     <p>歷屆詞彙題與考題例句：大學入學考試中心 92–115 學年度學測、93–110 學年度指考英文考科，著作權屬大考中心，僅供非營利學習使用。原創題為本站自編。</p>
+    ${TR.length ? '<p>中譯英：本站自編 50 組、100 句，參考解答由本站撰寫；評分方式依大考中心公布的學測英文非選擇題評分原則整理。</p>' : ''}
     <p>作答紀錄只存在你的裝置，不會上傳。</p>
   </section>`;
 }
 
-const VIEWS = { home: vHome, practice: vPractice, words: vWords, wrong: vWrong, me: vMe };
+/* ================= 中譯英 ================= */
+const trDoneN = () => TR.filter(t => S.tr.d[t.id]).length;
+function trNextId() {
+  // 先找還沒練過的；全部練過就回到最久沒練的那組
+  const un = TR.find(t => !S.tr.d[t.id]);
+  if (un) return un.id;
+  return TR.slice().sort((a, b) => S.tr.d[a.id] - S.tr.d[b.id] || a.id - b.id)[0].id;
+}
+function vTrans() {
+  const done = trDoneN(), nx = trNextId();
+  const ths = Object.keys(TR_TH).filter(k => TR.some(t => t.th === k));
+  return `<div><a class="back" href="#practice">${ICON.left}練習</a>
+  <header class="top"><div><p class="eyebrow">第 4 種模式・${TR.length} 組 ${TR.length * 2} 句</p><h1>${TR_MODE.name}</h1></div><div class="chip-count"><b>${done}</b><span>/ ${TR.length} 組已練</span></div></header></div>
+  <section class="card tr-intro">
+    <p>照學測的形式，每組 2 句、前後主題相連。先自己寫，再看參考解答；可以打在格子裡，也可以寫在紙上。</p>
+    <div class="btn-row"><button class="btn primary" type="button" data-act="trOpen" data-id="${nx}">${done ? `${done === TR.length ? '複習' : '繼續'}：第 ${nx} 組` : '從第 1 組開始'}</button></div>
+  </section>
+  <section class="card"><div class="sec-h"><h2>學測中譯英怎麼評分</h2></div>
+    <ul class="tr-rules"><li>共 2 題，每題 4 分，合計 8 分。</li><li>每個錯誤扣 0.5 分，扣完為止；相同的拼字或文法錯誤只扣一次。</li><li>句首沒有大寫、標點符號不妥，各扣 0.5 分，只扣一次。</li><li>用錯字、拼錯字、時態錯誤、漏譯都會被扣分。</li></ul>
+    <p class="src" style="margin-top:8px">依據：大考中心 115 學年度學測英文考科非選擇題評分原則</p></section>
+  ${ths.map(k => { const list = TR.filter(t => t.th === k); return `<section class="sec-block"><h2>${k} ${esc(TR_TH[k])}<span>第 ${list[0].id}–${list[list.length - 1].id} 組</span></h2>
+    <div class="clist">${list.map(t => `<button class="crow" type="button" data-act="trOpen" data-id="${t.id}"><span class="no">${pad2(t.id)}</span><span class="t"><b>${esc(t.title)}</b><small>${esc(t.s[0].zh)}</small></span><span class="pc">${S.tr.d[t.id] ? '<span class="tr-done">已練</span>' : ''}</span></button>`).join('')}</div></section>`; }).join('')}`;
+}
+
+let TRS = null, trSaveT = 0;
+function openTrans(id) {
+  if (!TR.length) return;
+  TRS = { id: TR_BY.has(+id) ? +id : TR[0].id, shown: false };
+  openOverlay('trans'); renderTr();
+}
+function renderTr() {
+  const t = TR_BY.get(TRS.id);
+  $('#qmode').textContent = TR_MODE.name;
+  $('#qprog').textContent = `第 ${t.id} 組 / ${TR.length}`;
+  $('#qscore').innerHTML = '';
+  $('#qfill').style.width = `${trDoneN() / TR.length * 100}%`;
+  let h = `<p class="kicker">第 ${t.id} 組・${esc(TR_TH[t.th] || '')}・${esc(t.title)}</p>
+    <p class="tr-ins">請將以下中文句子譯成正確、通順、達意的英文。每題 4 分，共 8 分。</p>
+    ${t.s.map((s, k) => `<div class="trq"><p class="trzh"><span class="trn">${k + 1}.</span>${esc(s.zh)}</p>
+      <textarea class="trin" id="trin${k + 1}" data-tr="${t.id}-${k + 1}" rows="3" placeholder="在這裡寫英文（也可以寫在紙上）" autocapitalize="sentences" autocorrect="off" spellcheck="false" aria-label="第 ${k + 1} 題的英文翻譯">${esc(S.tr.a[`${t.id}-${k + 1}`] || '')}</textarea></div>`).join('')}`;
+  if (!TRS.shown) h += `<div class="btn-row"><button class="btn primary" type="button" data-act="trShow">參考解答</button></div>`;
+  else h += t.s.map((s, k) => trAnsHTML(t, s, k)).join('') + '<p class="tr-tip">對照參考答案自己檢查：每個錯誤扣 0.5 分，相同的錯誤只扣一次；句首大寫和句尾標點也要檢查。和參考答案寫法不同，只要文法正確、意思完整也可以得分。</p>';
+  h += `<div class="fnav"><button class="btn small" type="button" data-act="trGo" data-id="${t.id - 1}" ${t.id > 1 ? '' : 'disabled'}>${ICON.left}上一組</button><button class="btn small ghost" type="button" data-act="trList">全部題目</button><button class="btn small ${TRS.shown ? 'primary' : ''}" type="button" data-act="trGo" data-id="${t.id + 1}" ${t.id < TR.length ? '' : 'disabled'}>下一組${ICON.right}</button></div>`;
+  $('#qbody').innerHTML = h;
+  $('#quiz').scrollTop = 0;
+}
+function trAnsHTML(t, s, k) {
+  const mine = S.tr.a[`${t.id}-${k + 1}`] || '';
+  const ws = s.wis.map(i => W[i]).filter(Boolean);
+  return `<section class="fb tr-ans">
+    <div class="fb-h"><b>第 ${k + 1} 題</b></div>
+    <p class="tr-q">${esc(s.zh)}</p>
+    <div class="tr-mine" id="trmine${k + 1}" ${mine.trim() ? '' : 'hidden'}><span class="lab">你的答案</span><p class="en">${esc(mine)}</p></div>
+    <div class="tr-ref"><div class="lab-row"><span class="lab">參考答案</span>${sayBtn(s.ref, 'say sm')}</div><p class="en">${esc(s.ref)}</p></div>
+    <div><span class="lab">其他寫法</span>${s.alt.map(a => `<p class="en">${esc(a)}</p>`).join('')}</div>
+    <div><span class="lab">句型重點</span><ul class="tr-list">${s.pat.map(p => `<li>${esc(p)}</li>`).join('')}</ul></div>
+    <div><span class="lab">關鍵字詞</span><div class="colls tr-keys">${s.key.map(([z, e]) => `<span><i>${esc(z)}</i>${esc(e)}</span>`).join('')}</div></div>
+    <div><span class="lab">易錯提醒</span><ul class="tr-list warn">${s.warn.flatMap(x => x.split('；')).map(p => `<li>${esc(p)}</li>`).join('')}</ul></div>
+    ${ws.length ? `<div><span class="lab">句中的 1800 單字（點了看字卡）</span><div class="tr-words">${ws.map(w => `<button type="button" class="tr-w" data-act="word" data-wi="${w.i}">${esc(w.w)}</button>`).join('')}</div></div>` : ''}
+  </section>`;
+}
+function trFlush() { if (trSaveT) { clearTimeout(trSaveT); trSaveT = 0; save(); } }
+function trInput(el) {
+  const k = el.dataset.tr, v = el.value;
+  if (v.trim()) S.tr.a[k] = v.slice(0, 2000); else delete S.tr.a[k];
+  const m = $('#trmine' + k.split('-')[1]);
+  if (m) { m.hidden = !v.trim(); const p = m.querySelector('p'); if (p) p.textContent = v; }
+  clearTimeout(trSaveT); trSaveT = setTimeout(() => { trSaveT = 0; save(); }, 400);
+}
+function trShow() {
+  if (OV !== 'trans' || !TRS || TRS.shown) return;
+  trFlush();
+  const t = today(), id = TRS.id;
+  if (S.tr.d[id] !== t) { const r = dayRec(); r.t = (r.t || 0) + 1; }
+  S.tr.d[id] = t; save();
+  TRS.shown = true; renderTr();
+  setTimeout(() => { const a = $('#qbody .tr-ans'); if (a) a.scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }); }, 40);
+}
+
+const VIEWS = { home: vHome, practice: vPractice, words: vWords, wrong: vWrong, me: vMe, trans: vTrans };
 function render() {
   const el = $('#view');
   el.innerHTML = view === 'card' ? vCard(cardNo) : VIEWS[view]();
-  const tab = view === 'card' ? 'words' : view;
+  const tab = view === 'card' ? 'words' : view === 'trans' ? 'practice' : view;
   $$('.tabs a').forEach(a => { if (a.dataset.tab === tab) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
 }
 function route() {
@@ -646,7 +741,8 @@ function go(v) { if (location.hash === '#' + v) route(); else location.hash = v;
 let Q = null, OV = null, autoT = 0;
 function openOverlay(kind) { OV = kind; $('#quiz').hidden = false; document.body.style.overflow = 'hidden'; $('#quiz').scrollTop = 0; }
 function closeOverlay() {
-  OV = null; Q = null; F = null; clearInterval(mockTimer); clearTimeout(autoT); TTS.stop();
+  trFlush();
+  OV = null; Q = null; F = null; TRS = null; clearInterval(mockTimer); clearTimeout(autoT); TTS.stop();
   if (M && !M.done) M = null;
   $('#quiz').hidden = true; document.body.style.overflow = ''; render();
 }
@@ -961,6 +1057,11 @@ const ACT = {
     startCards(list, '學新字', 'quiz');
   },
   mockNow: () => startMock(W, 10, 'mix', true),
+  trNext: () => openTrans(trNextId()),
+  trOpen: el => openTrans(+el.dataset.id),
+  trGo: el => { const id = +el.dataset.id; if (!TRS || !TR_BY.has(id)) return; trFlush(); TTS.stop(); TRS = { id, shown: false }; renderTr(); },
+  trShow: () => trShow(),
+  trList: () => { closeOverlay(); go('trans'); },
   resume: () => { if (!S.sess) return; Q = S.sess; openOverlay('quiz'); if (Q.a) nextQ(); else renderQ(); },
   dropResume: () => { S.sess = null; save(); render(); },
   setMode: el => { S.setup.mode = el.dataset.m; save(); render(); },
@@ -1072,7 +1173,10 @@ document.addEventListener('click', e => {
   e.preventDefault(); fn(el, e);
 });
 document.addEventListener('submit', e => { if (e.target.matches('[data-form="type"]')) { e.preventDefault(); submitTyping(false); } });
-document.addEventListener('input', e => { if (e.target.id === 'q') { searchQ = e.target.value; const r = $('#results'); if (r) r.innerHTML = searchQ.trim() ? resultsHTML() : sectionsHTML(); } });
+document.addEventListener('input', e => {
+  if (e.target.id === 'q') { searchQ = e.target.value; const r = $('#results'); if (r) r.innerHTML = searchQ.trim() ? resultsHTML() : sectionsHTML(); }
+  else if (e.target.dataset && e.target.dataset.tr) trInput(e.target);
+});
 document.addEventListener('change', e => {
   const el = e.target;
   if (el.id === 'importFile') { const f = el.files && el.files[0]; if (f) { const r = new FileReader(); r.onload = () => importData(r.result); r.readAsText(f); } el.value = ''; return; }
@@ -1111,7 +1215,7 @@ document.addEventListener('keydown', e => {
     else if (e.key === 'ArrowRight') ACT.mnext(); else if (e.key === 'ArrowLeft') ACT.mprev();
   }
 });
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && !OV) render(); });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') trFlush(); else if (!OV) render(); });
 window.addEventListener('hashchange', route);
 
 applyLook();
@@ -1120,5 +1224,5 @@ if (ENV !== 'artifact' && 'serviceWorker' in navigator && (location.protocol ===
   window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
 }
 // 給自動測試用
-window.__app = { get S() { return S; }, normalize, render, go, openWord, W, ORIG, PAST, PAST_BY, CARDS, ACT, makeQ, pickDistractors, record, rangeWords, startQuiz, startMock, pick, submitTyping, nextQ, rate, get Q() { return Q; }, get M() { return M; }, get F() { return F; }, lvl, levelCounts, searchWords, mixType, clash };
+window.__app = { get S() { return S; }, normalize, render, go, openWord, W, ORIG, PAST, PAST_BY, CARDS, ACT, makeQ, pickDistractors, record, rangeWords, startQuiz, startMock, pick, submitTyping, nextQ, rate, get Q() { return Q; }, get M() { return M; }, get F() { return F; }, lvl, levelCounts, searchWords, mixType, clash, TR, openTrans, get TRS() { return TRS; } };
 })();

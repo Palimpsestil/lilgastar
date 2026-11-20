@@ -166,7 +166,7 @@ svg{width:1.25em;height:1.25em;fill:none;stroke:currentColor;stroke-width:1.8;st
 .mode.main[aria-pressed="true"] .mnum{background:var(--blue);color:var(--on-blue)}
 .modes3.home .mode.main{grid-template-rows:auto auto}
 .modes3.home .mode.main .mnum{grid-row:1 / span 2}
-@media (min-width:560px){.modes3{grid-template-columns:repeat(3,minmax(0,1fr))}.mode.main{grid-template-columns:1fr;row-gap:4px}.mode.main .mnum{grid-row:auto}.modes3.home .mode.main .mnum{grid-row:auto}}
+@media (min-width:560px){.modes3{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .opt-group{display:flex;flex-direction:column;gap:8px}
 .opt-group > label,.opt-label{font-size:.82rem;color:var(--muted);font-weight:600;letter-spacing:.04em}
 .chips{display:flex;flex-wrap:wrap;gap:8px}
@@ -365,6 +365,40 @@ svg{width:1.25em;height:1.25em;fill:none;stroke:currentColor;stroke-width:1.8;st
 .review summary .mk{font-weight:700;width:1.2rem}
 .review summary .okc{color:var(--sage-ink)} .review summary .noc{color:var(--rose-ink)}
 .review .body{display:flex;flex-direction:column;gap:8px;padding:8px 0 4px 1.9rem}
+
+/* 中譯英 */
+.tr-intro{display:flex;flex-direction:column;gap:12px}
+.tr-intro p{font-size:.92rem;line-height:1.7}
+.tr-rules{margin:0;padding-left:1.2em;font-size:.9rem;line-height:1.8}
+.tr-done{color:var(--sage-ink);font-weight:600}
+.tr-ins{font-size:.85rem;color:var(--muted);line-height:1.6;margin-top:-8px}
+.trq{display:flex;flex-direction:column;gap:8px}
+.trzh{font-size:1.08rem;line-height:1.75;font-weight:600}
+.trn{color:var(--plum);margin-right:.4em;font-variant-numeric:tabular-nums}
+.trin{width:100%;min-height:6.5em;resize:vertical;border-radius:12px;border:1.5px solid var(--line2);background:var(--surface);padding:12px 14px;font-family:var(--font-en);font-size:1.05rem;line-height:1.6}
+.trin:focus{outline:none;border-color:var(--blue)}
+.trin::placeholder{color:var(--muted);font-family:var(--font-ui);font-size:.9rem}
+.tr-ans{gap:14px;scroll-margin-top:72px}
+.tr-ans .lab{display:block;font-size:.75rem;font-weight:600;letter-spacing:.08em;color:var(--muted);margin-bottom:4px}
+.tr-ans .lab-row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:2px}
+.tr-ans .lab-row .lab{margin:0}
+.tr-ans p.en{font-size:1.05rem;line-height:1.7}
+.tr-ans p.en + p.en{margin-top:6px}
+.tr-q{font-size:.92rem;color:var(--muted);line-height:1.65}
+.tr-mine{background:var(--surface2);border-radius:10px;padding:10px 12px}
+.tr-mine p.en{white-space:pre-wrap;overflow-wrap:anywhere}
+.tr-ref{background:var(--blue-soft2);border:1px solid var(--blue-soft);border-radius:10px;padding:10px 12px}
+.tr-ref p.en{color:var(--blue-ink);font-weight:600}
+.tr-list{margin:0;padding-left:1.2em;display:flex;flex-direction:column;gap:4px;font-size:.92rem;line-height:1.65}
+.tr-list.warn li::marker{color:var(--rose)}
+.tr-keys span{display:inline-flex;align-items:baseline;gap:6px}
+.tr-keys span i{font-style:normal;font-family:var(--font-ui);font-size:.8rem;opacity:.85}
+.tr-words{display:flex;flex-wrap:wrap;gap:6px}
+.tr-w{font-family:var(--font-en);font-size:.95rem;border:1px solid var(--line2);background:var(--surface);color:var(--blue-ink);border-radius:8px;padding:3px 10px;min-height:32px}
+.tr-w:hover{background:var(--surface2)}
+.tr-tip{font-size:.85rem;color:var(--muted);line-height:1.7}
+.say.sm{width:32px;height:32px}
+.say.sm svg{width:17px;height:17px}
 
 /* ---------- 單字詳情（底部面板） ---------- */
 .sheet-wrap{position:fixed;inset:0;z-index:60;display:flex;align-items:flex-end;justify-content:center}
