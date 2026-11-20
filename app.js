@@ -88,13 +88,18 @@ const TR_TH = DATA.TH || {};
 const TR = (DATA.T || []).map(a => ({ id: a[0], th: a[1], title: a[2], s: a[3].map(x => ({ zh: x[0], ref: x[1], alt: x[2], pat: x[3], key: x[4], warn: x[5], wis: x[6] })) }));
 const TR_BY = new Map(TR.map(t => [t.id, t]));
 
+// 閱讀測驗：每回 3 篇；每篇 [題材, 英文段落[], 題目[[題幹, 選項[], 圖片選項[], 答案 0–3, 題型, 詳解, 選項中譯]], 中譯段落[], 字詞[[字, 詞性, 中文]], 字數]
+const RD = (DATA.R || []).map(a => ({ no: a[0], p: a[1].map(x => ({ topic: x[0], text: x[1], q: x[2].map(q => ({ s: q[0], o: q[1], fig: q[2], a: q[3], t: q[4], e: q[5], z: q[6] })), zh: x[3], v: x[4], wc: x[5] })) }));
+const RD_BY = new Map(RD.map(r => [r.no, r]));
+const RD_N = RD.reduce((n, r) => n + r.p.length, 0);
+
 /* ================= 儲存 ================= */
 const KEY = 'gsat1800-v1';
 const DEFAULTS = { goal: 30, newN: 10, grad: 2, sound: true, autoSay: true, accent: 'en-US', rate: 0.9, autoNext: false,
   mixTyping: false, zhFirst: false, theme: 'auto', fs: 'm', exam: '2027-01-22', reviewN: 30 };
 const SETUP0 = { mode: 'e2c', cards: CARDS.map(c => c.no), levels: [3, 4, 5], filter: 'all', count: 20, order: 'random',
   mockN: 10, mockSrc: 'mix', mockTimed: true };
-function fresh() { return { app: 'gsat1800', v: 1, w: {}, days: {}, modes: {}, fav: {}, set: { ...DEFAULTS }, setup: { ...SETUP0, cards: SETUP0.cards.slice() }, sess: null, tr: { d: {}, a: {} }, since: dkey() }; }
+function fresh() { return { app: 'gsat1800', v: 1, w: {}, days: {}, modes: {}, fav: {}, set: { ...DEFAULTS }, setup: { ...SETUP0, cards: SETUP0.cards.slice() }, sess: null, tr: { d: {}, a: {} }, rd: { d: {}, a: {} }, since: dkey() }; }
 const HEADS = new Set(W.map(w => w.w));
 const TYPE_KEYS = ['e2c', 'c2e', 'cloze', 'past', 'listen', 'coll', 'spell'];
 const MODE_KEYS = ['e2c', 'c2e', 'cloze', 'mix', 'past', 'mock', 'cards', 'coll', 'spell', 'listen'];
@@ -146,6 +151,12 @@ function normalize(o) {
     // 中譯英：d = 每組最後練習的日子，a = 自己寫的答案（鍵為「組-句」）
     if (isObj(o.tr.d)) for (const k in o.tr.d) if (TR_BY.has(+k) && String(+k) === k) s.tr.d[k] = num(o.tr.d[k], today());
     if (isObj(o.tr.a)) for (const k in o.tr.a) { const m = /^(\d+)-([12])$/.exec(k), v = o.tr.a[k]; if (m && TR_BY.has(+m[1]) && typeof v === 'string' && v) s.tr.a[k] = v.slice(0, 2000); }
+  }
+  if (isObj(o.rd)) {
+    // 閱讀測驗：a = 每篇四題的作答，d = [對答案那天, 答對題數]
+    const okKey = k => { const m = /^(\d+)-([1-9])$/.exec(k); return !!m && RD_BY.has(+m[1]) && +m[2] <= RD_BY.get(+m[1]).p.length; };
+    if (isObj(o.rd.a)) for (const k in o.rd.a) { const v = o.rd.a[k]; if (okKey(k) && Array.isArray(v) && v.length === 4) s.rd.a[k] = v.map(x => { x = Math.floor(num(x, -1)); return x >= 0 && x <= 3 ? x : -1; }); }
+    if (isObj(o.rd.d)) for (const k in o.rd.d) { const v = o.rd.d[k]; if (okKey(k) && Array.isArray(v) && s.rd.a[k] && s.rd.a[k].every(x => x >= 0)) s.rd.d[k] = [num(v[0], today()), Math.max(0, Math.min(4, Math.floor(num(v[1]))))]; }
   }
   if (isObj(o.modes)) for (const k of TYPE_KEYS) { const r = o.modes[k]; if (isObj(r)) s.modes[k] = { q: num(r.q), c: num(r.c) }; }
   if (isObj(o.fav)) for (const k in o.fav) if (HEADS.has(k) && o.fav[k]) s.fav[k] = num(o.fav[k], today());
@@ -274,6 +285,10 @@ const MODES = [
 // 主要模式：1 英選中、2 中選英、3 原創題（單字題，共用練習設定）；4 中譯英（另有自己的頁面 #trans）
 const MAIN_MODES = ['e2c', 'c2e', 'cloze'];
 const TR_MODE = { name: '中譯英', desc: '看中文寫出英文句子，附參考解答' };
+// 5 閱讀測驗（另有自己的頁面 #read）
+const RD_MODE = { name: '閱讀測驗', desc: '每回 3 篇文章、每篇 4 題，附詳解與中譯' };
+const MODE_NO = { trans: 4, read: TR.length ? 5 : 4 };
+const MAIN_N = '三四五'[(TR.length ? 1 : 0) + (RD.length ? 1 : 0)];
 const modeName = m => (MODES.find(x => x.id === m) || {}).name || '練習';
 function hasType(t, w) {
   if (t === 'cloze') return ORIG.has(w.i);
@@ -456,8 +471,8 @@ function vHome() {
     <button class="big ${due.length ? '' : 'primary'}" type="button" data-act="learn"><b>學新字</b><span>${fresh0.length ? `從第 ${fresh0[0].g} 組接著學 ${Math.min(S.set.newN, fresh0.length)} 個` : '1800 字都學過了'}</span></button>
   </section>
   <section class="card">
-    <div class="sec-h"><h2>${TR.length ? '四' : '三'}種練習模式</h2><span class="muted num">${esc(rangeLabel(S.setup).split('：')[0])}・每次 ${S.setup.count} 題</span></div>
-    <div class="modes3 home">${MAIN_MODES.map((id, k) => `<button class="mode main" type="button" data-act="quickMode" data-m="${id}"><span class="mnum">${k + 1}</span><b>${TYPES[id].name}</b><span>${TYPES[id].desc}</span></button>`).join('')}${TR.length ? `<button class="mode main" type="button" data-act="trNext"><span class="mnum">4</span><b>${TR_MODE.name}</b><span>${TR_MODE.desc}</span></button>` : ''}</div>
+    <div class="sec-h"><h2>${MAIN_N}種練習模式</h2><span class="muted num">${esc(rangeLabel(S.setup).split('：')[0])}・每次 ${S.setup.count} 題</span></div>
+    <div class="modes3 home">${MAIN_MODES.map((id, k) => `<button class="mode main" type="button" data-act="quickMode" data-m="${id}"><span class="mnum">${k + 1}</span><b>${TYPES[id].name}</b><span>${TYPES[id].desc}</span></button>`).join('')}${TR.length ? `<button class="mode main" type="button" data-act="trNext"><span class="mnum">4</span><b>${TR_MODE.name}</b><span>${TR_MODE.desc}</span></button>` : ''}${RD.length ? `<button class="mode main" type="button" data-act="rdNext"><span class="mnum">${MODE_NO.read}</span><b>${RD_MODE.name}</b><span>${RD_MODE.desc}</span></button>` : ''}</div>
   </section>
   <section class="quick">
     <button type="button" data-act="go" data-to="wrong"><b class="num">${wrongN}</b>錯題本</button>
@@ -480,8 +495,8 @@ function vPractice() {
   const n = isMock ? Math.min(st.mockN, avail) : st.mode === 'past' ? Math.min(st.count, avail) : Math.min(st.count, avail);
   return `
   <header class="top"><div><p class="eyebrow">自訂練習</p><h1>選題型和範圍</h1></div></header>
-  <section class="opt-group"><span class="opt-label">${TR.length ? '四' : '三'}種主要模式</span>
-    <div class="modes3">${MODES.filter(m => MAIN_MODES.includes(m.id)).map((m, k) => modeBtn(m, cnt(m.id), st.mode, k + 1)).join('')}${TR.length ? `<button class="mode main" type="button" data-act="go" data-to="trans"><span class="mnum">4</span><b>${TR_MODE.name}</b><span>${TR_MODE.desc}</span><em>已練 ${trDoneN()} / ${TR.length} 組・點了看全部題目</em></button>` : ''}</div>
+  <section class="opt-group"><span class="opt-label">${MAIN_N}種主要模式</span>
+    <div class="modes3">${MODES.filter(m => MAIN_MODES.includes(m.id)).map((m, k) => modeBtn(m, cnt(m.id), st.mode, k + 1)).join('')}${TR.length ? `<button class="mode main" type="button" data-act="go" data-to="trans"><span class="mnum">4</span><b>${TR_MODE.name}</b><span>${TR_MODE.desc}</span><em>已練 ${trDoneN()} / ${TR.length} 組・點了看全部題目</em></button>` : ''}${RD.length ? `<button class="mode main" type="button" data-act="go" data-to="read"><span class="mnum">${MODE_NO.read}</span><b>${RD_MODE.name}</b><span>${RD_MODE.desc}</span><em>已做 ${rdDoneN()} / ${RD_N} 篇・點了看全部 ${RD.length} 回</em></button>` : ''}</div>
   </section>
   <section class="opt-group"><span class="opt-label">更多練習</span>
     <div class="modes">${MODES.filter(m => !MAIN_MODES.includes(m.id)).map(m => modeBtn(m, cnt(m.id), st.mode)).join('')}</div>
@@ -637,6 +652,7 @@ function vMe() {
     <p>單字：大學入學考試中心《高中英文參考詞彙表》第 3–5 級，依 83–115 年學測與 91–110 年指考的出現情形挑出 1800 字，分 60 組。</p>
     <p>歷屆詞彙題與考題例句：大學入學考試中心 92–115 學年度學測、93–110 學年度指考英文考科，著作權屬大考中心，僅供非營利學習使用。原創題為本站自編。</p>
     ${TR.length ? '<p>中譯英：本站自編 50 組、100 句，參考解答由本站撰寫；評分方式依大考中心公布的學測英文非選擇題評分原則整理。</p>' : ''}
+    ${RD.length ? `<p>閱讀測驗：本站自編 ${RD.length} 回、${RD_N} 篇文章，題目、詳解與中譯皆由本站撰寫。</p>` : ''}
     <p>作答紀錄只存在你的裝置，不會上傳。</p>
   </section>`;
 }
@@ -720,11 +736,98 @@ function trShow() {
   setTimeout(() => { const a = $('#qbody .tr-ans'); if (a) a.scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }); }, 40);
 }
 
-const VIEWS = { home: vHome, practice: vPractice, words: vWords, wrong: vWrong, me: vMe, trans: vTrans };
+/* ================= 閱讀測驗 ================= */
+// S.rd.a["回-篇"] = 四題的作答（0–3，沒選是 -1）；S.rd.d["回-篇"] = [對答案那天, 答對題數]
+const rdKey = (no, pi) => `${no}-${pi}`;
+const rdDoneN = () => Object.keys(S.rd.d).length;
+const rdSetDone = r => r.p.filter((_, k) => S.rd.d[rdKey(r.no, k + 1)]).length;
+const rdSetScore = r => r.p.reduce((n, _, k) => n + ((S.rd.d[rdKey(r.no, k + 1)] || [])[1] || 0), 0);
+function rdNext() {
+  for (const r of RD) for (let k = 1; k <= r.p.length; k++) if (!S.rd.d[rdKey(r.no, k)]) return [r.no, k];
+  return [RD[0].no, 1];
+}
+const rdTopic = t => { const m = /^(.*?)（(.*)）$/.exec(t); return m ? [m[1], m[2]] : [t, '']; };
+function vRead() {
+  const done = rdDoneN(), [nn, nk] = rdNext();
+  return `<div><a class="back" href="#practice">${ICON.left}練習</a>
+  <header class="top"><div><p class="eyebrow">第 ${MODE_NO.read} 種模式・${RD.length} 回 ${RD_N} 篇</p><h1>${RD_MODE.name}</h1></div><div class="chip-count"><b>${done}</b><span>/ ${RD_N} 篇已做</span></div></header></div>
+  <section class="card tr-intro">
+    <p>照學測閱讀測驗的形式，每回 3 篇文章、每篇 4 題，每題 2 分，一回共 24 分。先讀文章作答，再對答案看詳解、全文中譯和重要字詞。</p>
+    <div class="btn-row"><button class="btn primary" type="button" data-act="rdOpen" data-no="${nn}" data-pi="${nk}">${done ? `${done === RD_N ? '複習' : '繼續'}：第 ${nn} 回第 ${nk} 篇` : '從第 1 回開始'}</button></div>
+  </section>
+  ${RD.map(r => { const dn = rdSetDone(r); return `<section class="sec-block"><h2>第 ${pad2(r.no)} 回<span>${dn ? `已做 ${dn} / ${r.p.length} 篇・答對 ${rdSetScore(r)} / ${dn * 4} 題` : `${r.p.length} 篇 ${r.p.length * 4} 題`}</span></h2>
+    <div class="clist">${r.p.map((p, k) => { const d = S.rd.d[rdKey(r.no, k + 1)], [t1, t2] = rdTopic(p.topic);
+      return `<button class="crow" type="button" data-act="rdOpen" data-no="${r.no}" data-pi="${k + 1}"><span class="no">${k + 1}</span><span class="t"><b>${d ? esc(t1) : `第 ${k + 1} 篇`}</b><small>${d ? esc(t2 || `${p.wc} 字`) : `4 題・約 ${Math.round(p.wc / 10) * 10} 字`}</small></span><span class="pc">${d ? `<span class="tr-done">${d[1]} / 4</span>` : ''}</span></button>`; }).join('')}</div></section>`; }).join('')}`;
+}
+
+let RDS = null;
+function openRead(no, pi) {
+  if (!RD.length) return;
+  const r = RD_BY.get(+no) || RD[0];
+  RDS = { no: r.no, pi: Math.min(r.p.length, Math.max(1, +pi || 1)) };
+  openOverlay('read'); renderRd(true);
+}
+function rdCur() { const r = RD_BY.get(RDS.no), p = r.p[RDS.pi - 1], key = rdKey(r.no, RDS.pi); return { r, p, key, done: S.rd.d[key], ans: S.rd.a[key] || [-1, -1, -1, -1] }; }
+function rdOptCls(done, q, pickd, j) { return !done ? (pickd === j ? ' sel' : '') : j === q.a ? ' ok' : pickd === j ? ' no' : ' dim'; }
+function renderRd(top) {
+  const { r, p, done, ans } = rdCur();
+  const idx = RD.indexOf(r) * 3 + RDS.pi, [t1, t2] = rdTopic(p.topic);
+  $('#qmode').textContent = RD_MODE.name;
+  $('#qprog').textContent = `第 ${r.no} 回・第 ${RDS.pi} 篇`;
+  $('#qscore').innerHTML = done ? `<span class="${done[1] === 4 ? 'ok' : ''}">${done[1]} / 4</span>` : '';
+  $('#qfill').style.width = `${rdDoneN() / RD_N * 100}%`;
+  let h = `<p class="kicker">第 ${r.no} 回・第 ${RDS.pi} 篇（共 ${r.p.length} 篇）${done ? `・${esc(t1)}` : ''}</p>
+    <article class="rd-text">${p.text.map(x => `<p>${esc(x)}</p>`).join('')}</article>`;
+  h += p.q.map((q, i) => `<section class="rdq" id="rdq${i}">
+      <p class="rd-stem"><span class="trn">${i + 1}.</span><span>${q.s}</span></p>
+      ${q.fig.length ? `<div class="rd-figs">${q.fig.map((f, j) => `<button class="rd-fig${rdOptCls(done, q, ans[i], j)}" type="button" data-act="rdPick" data-q="${i}" data-j="${j}" ${done ? 'disabled' : ''} aria-pressed="${ans[i] === j}" aria-label="選項 ${'ABCD'[j]}"><span class="key">${'ABCD'[j]}</span>${f}</button>`).join('')}</div>`
+        : `<div class="opts">${q.o.map((o, j) => `<button class="opt en${rdOptCls(done, q, ans[i], j)}" type="button" data-act="rdPick" data-q="${i}" data-j="${j}" ${done ? 'disabled' : ''} aria-pressed="${ans[i] === j}"><span class="key">${'ABCD'[j]}</span><span class="t">${esc(o)}</span></button>`).join('')}</div>`}
+      ${done ? `<div class="rd-exp"><div class="rd-exp-h"><b class="${ans[i] === q.a ? 'ok' : 'no'}">${ans[i] === q.a ? '答對' : `答錯・正解 (${'ABCD'[q.a]})`}</b><span class="rd-tag">${esc(q.t)}</span></div><p>${q.e}</p>${q.z ? `<p class="rd-z">${esc(q.z)}</p>` : ''}</div>` : ''}
+    </section>`).join('');
+  if (!done) h += `<div class="btn-row"><button class="btn primary" type="button" data-act="rdSubmit">對答案</button></div>`;
+  else h += `<section class="fb rd-res" id="rdres"><div class="fb-h"><b>這篇答對 ${done[1]} / 4 題</b><button class="btn small" type="button" data-act="rdRedo">重做這篇</button></div>
+      <p class="rd-src"><span class="lab">題材</span>${esc(t1)}${t2 ? `（${esc(t2)}）` : ''}</p></section>
+    <details class="rd-more"><summary>全文中譯</summary><div class="rd-zh">${p.zh.map(x => `<p>${esc(x)}</p>`).join('')}</div></details>
+    <details class="rd-more" open><summary>重要字詞</summary><table class="rd-voc"><tbody>${p.v.map(v => `<tr><td class="en">${esc(v[0])}${sayBtn(v[0], 'say sm')}</td><td class="ps">${esc(v[1])}</td><td>${esc(v[2])}</td></tr>`).join('')}</tbody></table></details>`;
+  h += `<div class="fnav"><button class="btn small" type="button" data-act="rdGo" data-d="-1" ${idx > 1 ? '' : 'disabled'}>${ICON.left}上一篇</button><button class="btn small ghost" type="button" data-act="rdList">全部題目</button><button class="btn small ${done ? 'primary' : ''}" type="button" data-act="rdGo" data-d="1" ${idx < RD_N ? '' : 'disabled'}>下一篇${ICON.right}</button></div>`;
+  $('#qbody').innerHTML = h;
+  if (top) $('#quiz').scrollTop = 0;
+}
+function rdPick(i, j) {
+  if (OV !== 'read' || !RDS) return;
+  const { key, done, ans } = rdCur();
+  if (done) return;
+  const a = ans.slice(); a[i] = a[i] === j ? -1 : j;
+  if (a.some(x => x >= 0)) S.rd.a[key] = a; else delete S.rd.a[key];
+  save();
+  $$(`#rdq${i} [data-act="rdPick"]`).forEach(b => { const on = +b.dataset.j === a[i]; b.classList.toggle('sel', on); b.setAttribute('aria-pressed', on); });
+}
+function rdSubmit() {
+  if (OV !== 'read' || !RDS) return;
+  const { p, key, done, ans } = rdCur();
+  if (done) return;
+  const miss = ans.findIndex(x => x < 0);
+  if (miss >= 0) { toast(`第 ${miss + 1} 題還沒作答`); const el = $('#rdq' + miss); if (el) el.scrollIntoView({ block: 'start', behavior: 'smooth' }); return; }
+  const c = p.q.filter((q, i) => ans[i] === q.a).length;
+  S.rd.a[key] = ans.slice(); S.rd.d[key] = [today(), c];
+  const rec = dayRec(); rec.q += p.q.length; rec.c += c;
+  save(); renderRd(false);
+  setTimeout(() => { const el = $('#rdq0'); if (el) el.scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }); }, 40);
+}
+function rdRedo() { if (!RDS) return; const { key } = rdCur(); delete S.rd.a[key]; delete S.rd.d[key]; save(); TTS.stop(); renderRd(true); }
+function rdGo(d) {
+  if (!RDS) return;
+  const flat = []; RD.forEach(r => r.p.forEach((_, k) => flat.push([r.no, k + 1])));
+  const i = flat.findIndex(x => x[0] === RDS.no && x[1] === RDS.pi) + d;
+  if (i < 0 || i >= flat.length) return;
+  TTS.stop(); RDS = { no: flat[i][0], pi: flat[i][1] }; renderRd(true);
+}
+
+const VIEWS = { home: vHome, practice: vPractice, words: vWords, wrong: vWrong, me: vMe, trans: vTrans, read: vRead };
 function render() {
   const el = $('#view');
   el.innerHTML = view === 'card' ? vCard(cardNo) : VIEWS[view]();
-  const tab = view === 'card' ? 'words' : view === 'trans' ? 'practice' : view;
+  const tab = view === 'card' ? 'words' : view === 'trans' || view === 'read' ? 'practice' : view;
   $$('.tabs a').forEach(a => { if (a.dataset.tab === tab) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
 }
 function route() {
@@ -742,7 +845,7 @@ let Q = null, OV = null, autoT = 0;
 function openOverlay(kind) { OV = kind; $('#quiz').hidden = false; document.body.style.overflow = 'hidden'; $('#quiz').scrollTop = 0; }
 function closeOverlay() {
   trFlush();
-  OV = null; Q = null; F = null; TRS = null; clearInterval(mockTimer); clearTimeout(autoT); TTS.stop();
+  OV = null; Q = null; F = null; TRS = null; RDS = null; clearInterval(mockTimer); clearTimeout(autoT); TTS.stop();
   if (M && !M.done) M = null;
   $('#quiz').hidden = true; document.body.style.overflow = ''; render();
 }
@@ -1062,6 +1165,13 @@ const ACT = {
   trGo: el => { const id = +el.dataset.id; if (!TRS || !TR_BY.has(id)) return; trFlush(); TTS.stop(); TRS = { id, shown: false }; renderTr(); },
   trShow: () => trShow(),
   trList: () => { closeOverlay(); go('trans'); },
+  rdNext: () => { const [no, pi] = rdNext(); openRead(no, pi); },
+  rdOpen: el => openRead(+el.dataset.no, +el.dataset.pi),
+  rdPick: el => rdPick(+el.dataset.q, +el.dataset.j),
+  rdSubmit: () => rdSubmit(),
+  rdRedo: () => rdRedo(),
+  rdGo: el => rdGo(+el.dataset.d),
+  rdList: () => { closeOverlay(); go('read'); },
   resume: () => { if (!S.sess) return; Q = S.sess; openOverlay('quiz'); if (Q.a) nextQ(); else renderQ(); },
   dropResume: () => { S.sess = null; save(); render(); },
   setMode: el => { S.setup.mode = el.dataset.m; save(); render(); },
