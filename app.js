@@ -123,7 +123,7 @@ function mxGrade(r, a) {
 
 /* ================= 儲存 ================= */
 const KEY = 'gsat1800-v1';
-const DEFAULTS = { goal: 30, newN: 10, grad: 2, sound: true, autoSay: true, accent: 'en-US', rate: 0.9, autoNext: false,
+const DEFAULTS = { goal: 30, newN: 10, grad: 2, sound: false, autoSay: false, accent: 'en-US', rate: 0.9, autoNext: false,
   mixTyping: false, zhFirst: false, theme: 'auto', fs: 'm', exam: '2027-01-22', reviewN: 30 };
 const SETUP0 = { mode: 'e2c', cards: CARDS.map(c => c.no), levels: [3, 4, 5], filter: 'all', count: 20, order: 'random',
   mockN: 10, mockSrc: 'mix', mockTimed: true };
@@ -524,7 +524,7 @@ function vHome() {
   const resume = ss && ss.i < ss.qs.length ? `<div class="resume"><p>上次的「${esc(ss.title)}」做到第 ${ss.i + 1} / ${ss.qs.length} 題</p><div class="btn-row" style="flex:none"><button class="btn small ghost" type="button" data-act="dropResume">不用了</button><button class="btn small primary" type="button" data-act="resume">繼續</button></div></div>` : '';
   return `
   <header class="top">
-    <div><p class="eyebrow">學測英文 · 核心 1800 單字</p><h1>今天練什麼？</h1></div>
+    <div><p class="eyebrow">學測英文復興計劃</p><h1>今天練什麼？</h1></div>
     ${left != null && left >= 0 ? `<div class="countdown" aria-label="距離學測還有 ${left} 天"><span>距學測</span><b>${left}</b><span>天・${md(exam)}（${wk(exam)}）</span></div>` : ''}
   </header>
   ${resume}
@@ -1694,7 +1694,7 @@ const ACT = {
   close: () => closeOverlay(),
   retryWrong: () => { const ws = [...new Set(lastQ.wrong)].map(i => W[i]); startQuiz(shuffle(ws), '錯題再練', 'mix'); },
   again: () => { const ws = (lastQ.words || []).map(i => W[i]); if (lastQ.mode === 'word') return ACT.wordQuiz({ dataset: { wi: ws[0].i } }); startQuiz(shuffle(ws), lastQ.title, lastQ.mode === 'past' ? 'past' : (TYPES[lastQ.mode] ? lastQ.mode : 'mix')); },
-  copyScore: () => { const q = lastQ; copyText(`學測英文 1800｜${q.title} ${q.n} 題答對 ${q.c} 題（${q.n ? Math.round(q.c / q.n * 100) : 0}%）`, '已複製成績'); },
+  copyScore: () => { const q = lastQ; copyText(`學測英文復興計劃｜${q.title} ${q.n} 題答對 ${q.c} 題（${q.n ? Math.round(q.c / q.n * 100) : 0}%）`, '已複製成績'); },
   flip: () => flip(),
   rate: el => rate(+el.dataset.r),
   fprev: () => { if (F && F.i > 0) { F.i--; F.flip = false; renderF(); } },
@@ -1716,7 +1716,7 @@ const ACT = {
   copyList: () => {
     const ws = listWords(listTab);
     const name = listTab === 'fav' ? '收藏' : listTab === 'grad' ? '已畢業' : '錯題本';
-    copyText(`學測英文 1800｜${name}（${ws.length} 字）\n` + ws.map(w => { const s = S.w[w.w]; return `${w.w}（${w.p}）${w.zh}${s && s.x ? `｜錯 ${s.x} 次` : ''}`; }).join('\n'), '已複製清單');
+    copyText(`學測英文復興計劃｜${name}（${ws.length} 字）\n` + ws.map(w => { const s = S.w[w.w]; return `${w.w}（${w.p}）${w.zh}${s && s.x ? `｜錯 ${s.x} 次` : ''}`; }).join('\n'), '已複製清單');
   },
   exportFile: () => download(`學測1800備份_${dkey()}.json`, backupText()),
   exportCode: () => copyText(backupText(), '已複製備份碼，請貼到記事本保存'),
