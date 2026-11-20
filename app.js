@@ -93,13 +93,41 @@ const RD = (DATA.R || []).map(a => ({ no: a[0], p: a[1].map(x => ({ topic: x[0],
 const RD_BY = new Map(RD.map(r => [r.no, r]));
 const RD_N = RD.reduce((n, r) => n + r.p.length, 0);
 
+// 綜合測驗：每回 2 篇；每篇 [英文段落[]（含 [n] 空格）, 題目[[選項[4], 答案 0–3, 考點, 詳解, 選項中譯]], 中譯段落[], 字數]
+const CZ = (DATA.C || []).map(a => ({ no: a[0], p: a[1].map(x => ({ text: x[0], q: x[1].map(q => ({ o: q[0], a: q[1], t: q[2], e: q[3], z: q[4] })), zh: x[2], wc: x[3] })) }));
+const CZ_BY = new Map(CZ.map(r => [r.no, r]));
+const CZ_N = CZ.reduce((n, r) => n + r.p.length, 0);
+
+// 文意選填：每回 [回數, 題材, 英文段落[]（[[n]] 是空格）, 選項[10], 每格 [答案 0–9, 詞性, 解析], 中譯段落[], 字數]
+const BK = (DATA.B || []).map(a => ({ no: a[0], topic: a[1], text: a[2], o: a[3], q: a[4].map(q => ({ a: q[0], pos: q[1], e: q[2] })), zh: a[5], wc: a[6] }));
+const BK_BY = new Map(BK.map(r => [r.no, r]));
+// 篇章結構：每回 [回數, 題材, 英文段落[]（[[n]] 是空格）, 選項[5], 答案[4]（0–4）, 解析[4], [多餘選項, 解析], 中譯段落[], 字數]
+const PS = (DATA.PS || []).map(a => ({ no: a[0], topic: a[1], text: a[2], o: a[3], a: a[4], e: a[5], x: a[6], zh: a[7], wc: a[8] }));
+const PS_BY = new Map(PS.map(r => [r.no, r]));
+// 混合題：每回 [回數, 類型 F/P/L, 題材, 前言, 段落 [代號, 標題, 內文], 填充 [句子, [[可接受的答案], 原文用字, 解析]×2],
+//   多選 [題幹, 選項（只有雙文題有）, 答案代號, 解析], 簡答 [題幹, [可接受的答案], 解析], 中譯[]]
+const MX = (DATA.MX || []).map(a => ({ no: a[0], type: a[1], topic: a[2], intro: a[3], b: a[4].map(x => ({ k: x[0], h: x[1], t: x[2] })),
+  f: { s: a[5][0], a: a[5][1].map(x => ({ w: x[0], src: x[1], e: x[2] })) }, m: { s: a[6][0], o: a[6][1], a: a[6][2], e: a[6][3] },
+  s: { s: a[7][0], a: a[7][1], e: a[7][2] }, zh: a[8] }));
+const MX_BY = new Map(MX.map(r => [r.no, r]));
+// 混合題多選可以選的代號：雙文題是選項 A–F，論壇題和列舉題是各段的代號
+function mxKeys(r) { return r.m.o.length ? 'ABCDEF'.slice(0, r.m.o.length) : r.b.map(x => x.k).join(''); }
+// 比對手寫的答案：不分大小寫，去掉雙引號、前後的空白和句尾標點
+function mxNorm(s) { return String(s == null ? '' : s).toLowerCase().replace(/[’‘`]/g, "'").replace(/["“”]/g, '').replace(/\s+/g, ' ').replace(/^[\s'(（]+|[\s'.。!！?？)）]+$/g, ''); }
+function mxGrade(r, a) {
+  a = a || { f: ['', ''], m: '', s: '' };
+  const f = r.f.a.map((x, i) => !!mxNorm(a.f[i]) && x.w.some(w => mxNorm(w) === mxNorm(a.f[i])));
+  const m = a.m === r.m.a, s = !!mxNorm(a.s) && r.s.a.some(x => mxNorm(x) === mxNorm(a.s));
+  return { f, m, s, n: f.filter(Boolean).length + (m ? 1 : 0) + (s ? 1 : 0) };
+}
+
 /* ================= 儲存 ================= */
 const KEY = 'gsat1800-v1';
 const DEFAULTS = { goal: 30, newN: 10, grad: 2, sound: true, autoSay: true, accent: 'en-US', rate: 0.9, autoNext: false,
   mixTyping: false, zhFirst: false, theme: 'auto', fs: 'm', exam: '2027-01-22', reviewN: 30 };
 const SETUP0 = { mode: 'e2c', cards: CARDS.map(c => c.no), levels: [3, 4, 5], filter: 'all', count: 20, order: 'random',
   mockN: 10, mockSrc: 'mix', mockTimed: true };
-function fresh() { return { app: 'gsat1800', v: 1, w: {}, days: {}, modes: {}, fav: {}, set: { ...DEFAULTS }, setup: { ...SETUP0, cards: SETUP0.cards.slice() }, sess: null, tr: { d: {}, a: {} }, rd: { d: {}, a: {} }, since: dkey() }; }
+function fresh() { return { app: 'gsat1800', v: 1, w: {}, days: {}, modes: {}, fav: {}, set: { ...DEFAULTS }, setup: { ...SETUP0, cards: SETUP0.cards.slice() }, sess: null, tr: { d: {}, a: {} }, cz: { d: {}, a: {} }, rd: { d: {}, a: {} }, bk: { d: {}, a: {} }, ps: { d: {}, a: {} }, mx: { d: {}, a: {} }, since: dkey() }; }
 const HEADS = new Set(W.map(w => w.w));
 const TYPE_KEYS = ['e2c', 'c2e', 'cloze', 'past', 'listen', 'coll', 'spell'];
 const MODE_KEYS = ['e2c', 'c2e', 'cloze', 'mix', 'past', 'mock', 'cards', 'coll', 'spell', 'listen'];
@@ -152,11 +180,42 @@ function normalize(o) {
     if (isObj(o.tr.d)) for (const k in o.tr.d) if (TR_BY.has(+k) && String(+k) === k) s.tr.d[k] = num(o.tr.d[k], today());
     if (isObj(o.tr.a)) for (const k in o.tr.a) { const m = /^(\d+)-([12])$/.exec(k), v = o.tr.a[k]; if (m && TR_BY.has(+m[1]) && typeof v === 'string' && v) s.tr.a[k] = v.slice(0, 2000); }
   }
+  if (isObj(o.cz)) {
+    // 綜合測驗：a = 每篇五格的作答，d = [對答案那天, 答對題數]
+    const okKey = k => { const m = /^(\d+)-([1-9])$/.exec(k); return !!m && CZ_BY.has(+m[1]) && +m[2] <= CZ_BY.get(+m[1]).p.length; };
+    if (isObj(o.cz.a)) for (const k in o.cz.a) { const v = o.cz.a[k]; if (okKey(k) && Array.isArray(v) && v.length === 5) s.cz.a[k] = v.map(x => { x = Math.floor(num(x, -1)); return x >= 0 && x <= 3 ? x : -1; }); }
+    if (isObj(o.cz.d)) for (const k in o.cz.d) { const v = o.cz.d[k]; if (okKey(k) && Array.isArray(v) && s.cz.a[k] && s.cz.a[k].every(x => x >= 0)) s.cz.d[k] = [num(v[0], today()), Math.max(0, Math.min(5, Math.floor(num(v[1]))))]; }
+  }
   if (isObj(o.rd)) {
     // 閱讀測驗：a = 每篇四題的作答，d = [對答案那天, 答對題數]
     const okKey = k => { const m = /^(\d+)-([1-9])$/.exec(k); return !!m && RD_BY.has(+m[1]) && +m[2] <= RD_BY.get(+m[1]).p.length; };
     if (isObj(o.rd.a)) for (const k in o.rd.a) { const v = o.rd.a[k]; if (okKey(k) && Array.isArray(v) && v.length === 4) s.rd.a[k] = v.map(x => { x = Math.floor(num(x, -1)); return x >= 0 && x <= 3 ? x : -1; }); }
     if (isObj(o.rd.d)) for (const k in o.rd.d) { const v = o.rd.d[k]; if (okKey(k) && Array.isArray(v) && s.rd.a[k] && s.rd.a[k].every(x => x >= 0)) s.rd.d[k] = [num(v[0], today()), Math.max(0, Math.min(4, Math.floor(num(v[1]))))]; }
+  }
+  // 文意選填、篇章結構：a = 每回各格選了第幾個選項（沒填 -1），d = [對答案那天, 答對格數]；答對格數用現在的答案重算
+  const pickSet = (src, dst, BY, n, m, keyOf) => {
+    if (!isObj(src)) return;
+    const okKey = k => String(+k) === k && BY.has(+k);
+    if (isObj(src.a)) for (const k in src.a) { const v = src.a[k]; if (okKey(k) && Array.isArray(v) && v.length === n) { const a = v.map(x => { x = Math.floor(num(x, -1)); return x >= 0 && x < m ? x : -1; }); if (a.some(x => x >= 0)) dst.a[k] = a; } }
+    if (isObj(src.d)) for (const k in src.d) { const v = src.d[k], a = dst.a[k]; if (okKey(k) && Array.isArray(v) && a && a.every(x => x >= 0)) { const key = keyOf(BY.get(+k)); dst.d[k] = [num(v[0], today()), a.filter((x, i) => x === key[i]).length]; } }
+  };
+  pickSet(o.bk, s.bk, BK_BY, 10, 10, r => r.q.map(q => q.a));
+  pickSet(o.ps, s.ps, PS_BY, 4, 5, r => r.a);
+  if (isObj(o.mx)) {
+    // 混合題：a = { f: [第 47 格, 第 48 格], m: 多選選的代號, s: 簡答 }，d = [對答案那天, 答對題數, 簡答自己判定算對 0/1]
+    const okKey = k => String(+k) === k && MX_BY.has(+k);
+    const str = (v, n) => typeof v === 'string' ? v.slice(0, n) : '';
+    if (isObj(o.mx.a)) for (const k in o.mx.a) {
+      const v = o.mx.a[k]; if (!okKey(k) || !isObj(v)) continue;
+      const keys = mxKeys(MX_BY.get(+k));
+      const a = { f: [0, 1].map(i => str(Array.isArray(v.f) ? v.f[i] : '', 40)), m: [...new Set(str(v.m, 20).split(''))].filter(c => keys.includes(c)).sort().join(''), s: str(v.s, 200) };
+      if (a.f[0] || a.f[1] || a.m || a.s) s.mx.a[k] = a;
+    }
+    if (isObj(o.mx.d)) for (const k in o.mx.d) {
+      const v = o.mx.d[k], a = s.mx.a[k]; if (!okKey(k) || !Array.isArray(v) || !a) continue;
+      const g = mxGrade(MX_BY.get(+k), a), self = !g.s && v[2] && mxNorm(a.s) ? 1 : 0;
+      s.mx.d[k] = [num(v[0], today()), g.n + self, self];
+    }
   }
   if (isObj(o.modes)) for (const k of TYPE_KEYS) { const r = o.modes[k]; if (isObj(r)) s.modes[k] = { q: num(r.q), c: num(r.c) }; }
   if (isObj(o.fav)) for (const k in o.fav) if (HEADS.has(k) && o.fav[k]) s.fav[k] = num(o.fav[k], today());
@@ -282,13 +341,24 @@ const MODES = [
   { id: 'cards', name: '字卡', desc: '翻卡背誦，自己評熟悉度' },
   { id: 'coll', ...TYPES.coll }, { id: 'spell', ...TYPES.spell }, { id: 'listen', ...TYPES.listen },
 ];
-// 主要模式：1 英選中、2 中選英、3 原創題（單字題，共用練習設定）；4 中譯英（另有自己的頁面 #trans）
+// 主要模式：1 英選中、2 中選英、3 原創題（單字題，共用練習設定）
 const MAIN_MODES = ['e2c', 'c2e', 'cloze'];
-const TR_MODE = { name: '中譯英', desc: '看中文寫出英文句子，附參考解答' };
-// 5 閱讀測驗（另有自己的頁面 #read）
+// 4 之後是題組型，各有自己的頁面，順序和學測考卷一樣：
+// 4 綜合測驗（#cloze）、5 文意選填（#bank）、6 篇章結構（#struct）、7 閱讀測驗（#read）、8 混合題（#mixed）、9 中譯英（#trans）
+const CZ_MODE = { name: '綜合測驗', desc: '每回 2 篇短文、每篇 5 格，附詳解與中譯' };
+const BK_MODE = { name: '文意選填', desc: '每回 10 格配 10 個選項，附解析與中譯' };
+const PS_MODE = { name: '篇章結構', desc: '每回 4 格配 5 個句子，附解析與中譯' };
 const RD_MODE = { name: '閱讀測驗', desc: '每回 3 篇文章、每篇 4 題，附詳解與中譯' };
-const MODE_NO = { trans: 4, read: TR.length ? 5 : 4 };
-const MAIN_N = '三四五'[(TR.length ? 1 : 0) + (RD.length ? 1 : 0)];
+const MX_MODE = { name: '混合題', desc: '每回 1 個題組：填充、多選、簡答，附解析' };
+const TR_MODE = { name: '中譯英', desc: '看中文寫出英文句子，附參考解答' };
+const SETS = [
+  { id: 'cloze', m: CZ_MODE, n: CZ.length, next: 'czNext' }, { id: 'bank', m: BK_MODE, n: BK.length, next: 'bkNext' },
+  { id: 'struct', m: PS_MODE, n: PS.length, next: 'psNext' }, { id: 'read', m: RD_MODE, n: RD.length, next: 'rdNext' },
+  { id: 'mixed', m: MX_MODE, n: MX.length, next: 'mxNext' }, { id: 'trans', m: TR_MODE, n: TR.length, next: 'trNext' },
+].filter(x => x.n);
+const MODE_NO = {};
+SETS.forEach((x, i) => { MODE_NO[x.id] = MAIN_MODES.length + 1 + i; });
+const MAIN_N = '三四五六七八九'[SETS.length];
 const modeName = m => (MODES.find(x => x.id === m) || {}).name || '練習';
 function hasType(t, w) {
   if (t === 'cloze') return ORIG.has(w.i);
@@ -472,7 +542,7 @@ function vHome() {
   </section>
   <section class="card">
     <div class="sec-h"><h2>${MAIN_N}種練習模式</h2><span class="muted num">${esc(rangeLabel(S.setup).split('：')[0])}・每次 ${S.setup.count} 題</span></div>
-    <div class="modes3 home">${MAIN_MODES.map((id, k) => `<button class="mode main" type="button" data-act="quickMode" data-m="${id}"><span class="mnum">${k + 1}</span><b>${TYPES[id].name}</b><span>${TYPES[id].desc}</span></button>`).join('')}${TR.length ? `<button class="mode main" type="button" data-act="trNext"><span class="mnum">4</span><b>${TR_MODE.name}</b><span>${TR_MODE.desc}</span></button>` : ''}${RD.length ? `<button class="mode main" type="button" data-act="rdNext"><span class="mnum">${MODE_NO.read}</span><b>${RD_MODE.name}</b><span>${RD_MODE.desc}</span></button>` : ''}</div>
+    <div class="modes3 home">${MAIN_MODES.map((id, k) => `<button class="mode main" type="button" data-act="quickMode" data-m="${id}"><span class="mnum">${k + 1}</span><b>${TYPES[id].name}</b><span>${TYPES[id].desc}</span></button>`).join('')}${SETS.map(x => `<button class="mode main" type="button" data-act="${x.next}"><span class="mnum">${MODE_NO[x.id]}</span><b>${x.m.name}</b><span>${x.m.desc}</span></button>`).join('')}</div>
   </section>
   <section class="quick">
     <button type="button" data-act="go" data-to="wrong"><b class="num">${wrongN}</b>錯題本</button>
@@ -486,6 +556,17 @@ function vHome() {
   ${!storeOK ? '<p class="empty">這個瀏覽器目前無法儲存進度，關掉網頁後紀錄會消失。</p>' : ''}`;
 }
 
+// 題組型模式的進度：d 的每一筆是 [對答案那天, 答對數]
+const dSum = d => Object.values(d).reduce((n, v) => n + (v[1] || 0), 0);
+function setNote(id) {
+  const n = k => Object.keys(S[k].d).length;
+  return id === 'cloze' ? `已做 ${n('cz')} / ${CZ_N} 篇・點了看全部 ${CZ.length} 回`
+    : id === 'read' ? `已做 ${n('rd')} / ${RD_N} 篇・點了看全部 ${RD.length} 回`
+    : id === 'bank' ? `已做 ${n('bk')} / ${BK.length} 回・點了看全部題目`
+    : id === 'struct' ? `已做 ${n('ps')} / ${PS.length} 回・點了看全部題目`
+    : id === 'mixed' ? `已做 ${n('mx')} / ${MX.length} 回・點了看全部題目`
+    : `已練 ${trDoneN()} / ${TR.length} 組・點了看全部題目`;
+}
 function vPractice() {
   const st = S.setup, range = rangeWords(st), inR = new Set(range.map(w => w.i));
   const cnt = m => m === 'past' ? PAST.filter(p => inR.has(p.wi)).length : range.filter(w => modeHas(m, w)).length;
@@ -496,7 +577,7 @@ function vPractice() {
   return `
   <header class="top"><div><p class="eyebrow">自訂練習</p><h1>選題型和範圍</h1></div></header>
   <section class="opt-group"><span class="opt-label">${MAIN_N}種主要模式</span>
-    <div class="modes3">${MODES.filter(m => MAIN_MODES.includes(m.id)).map((m, k) => modeBtn(m, cnt(m.id), st.mode, k + 1)).join('')}${TR.length ? `<button class="mode main" type="button" data-act="go" data-to="trans"><span class="mnum">4</span><b>${TR_MODE.name}</b><span>${TR_MODE.desc}</span><em>已練 ${trDoneN()} / ${TR.length} 組・點了看全部題目</em></button>` : ''}${RD.length ? `<button class="mode main" type="button" data-act="go" data-to="read"><span class="mnum">${MODE_NO.read}</span><b>${RD_MODE.name}</b><span>${RD_MODE.desc}</span><em>已做 ${rdDoneN()} / ${RD_N} 篇・點了看全部 ${RD.length} 回</em></button>` : ''}</div>
+    <div class="modes3">${MODES.filter(m => MAIN_MODES.includes(m.id)).map((m, k) => modeBtn(m, cnt(m.id), st.mode, k + 1)).join('')}${SETS.map(x => `<button class="mode main" type="button" data-act="go" data-to="${x.id}"><span class="mnum">${MODE_NO[x.id]}</span><b>${x.m.name}</b><span>${x.m.desc}</span><em>${setNote(x.id)}</em></button>`).join('')}</div>
   </section>
   <section class="opt-group"><span class="opt-label">更多練習</span>
     <div class="modes">${MODES.filter(m => !MAIN_MODES.includes(m.id)).map(m => modeBtn(m, cnt(m.id), st.mode)).join('')}</div>
@@ -609,7 +690,10 @@ function vMe() {
     <div class="bars-x">${bars.map((b, i) => `<span>${i % 2 === 1 ? md(b.n) : ''}</span>`).join('')}</div>`;
   const heat = SECS.map(sec => `<div class="heat-row"><span>${sec.key} ${esc(sec.name)}</span><div class="heat-cells">${sec.cards.map(no => { const c = CARDS[no - 1], f = c.words.filter(w => lvl(w) >= 2).length / c.words.length; const h = f === 0 ? 0 : f < .25 ? 1 : f < .5 ? 2 : f < .75 ? 3 : 4; return `<a class="H${h} ${h >= 3 ? 'hi' : ''}" href="#card-${no}" title="第 ${no} 組 ${esc(c.topic)}：熟悉以上 ${Math.round(f * 100)}%">${no}</a>`; }).join('')}</div></div>`).join('');
   const trN = trDoneN();
+  const setRec = (name, d, total, unit, per, pu) => { const n = Object.keys(d).length; return n ? `<div><span>${name}</span><b>已做 ${n} / ${total} ${unit}<span class="muted">（答對 ${dSum(d)} / ${n * per} ${pu}）</span></b></div>` : ''; };
   const modes = Object.keys(TYPES).filter(k => S.modes[k] && S.modes[k].q).map(k => `<div><span>${TYPES[k].name}</span><b>${Math.round(S.modes[k].c / S.modes[k].q * 100)}%<span class="muted">（${S.modes[k].c}/${S.modes[k].q}）</span></b></div>`).join('')
+    + setRec(CZ_MODE.name, S.cz.d, CZ_N, '篇', 5, '題') + setRec(BK_MODE.name, S.bk.d, BK.length, '回', 10, '格') + setRec(PS_MODE.name, S.ps.d, PS.length, '回', 4, '格')
+    + setRec(RD_MODE.name, S.rd.d, RD_N, '篇', 4, '題') + setRec(MX_MODE.name, S.mx.d, MX.length, '回', 4, '題')
     + (trN ? `<div><span>${TR_MODE.name}</span><b>已練 ${trN} / ${TR.length} 組</b></div>` : '');
   const often = W.filter(w => S.w[w.w] && S.w[w.w].x > 0).sort((a, b) => S.w[b.w].x - S.w[a.w].x).slice(0, 8);
   const sel = (k, opts) => `<select data-set="${k}" id="set-${k}">${opts.map(([v, n]) => `<option value="${v}" ${String(S.set[k]) === String(v) ? 'selected' : ''}>${n}</option>`).join('')}</select>`;
@@ -651,8 +735,11 @@ function vMe() {
   <section class="card about"><div class="sec-h"><h2 style="color:var(--ink)">關於</h2><span class="num">版本 ${esc(window.APP_VER || '')}</span></div>
     <p>單字：大學入學考試中心《高中英文參考詞彙表》第 3–5 級，依 83–115 年學測與 91–110 年指考的出現情形挑出 1800 字，分 60 組。</p>
     <p>歷屆詞彙題與考題例句：大學入學考試中心 92–115 學年度學測、93–110 學年度指考英文考科，著作權屬大考中心，僅供非營利學習使用。原創題為本站自編。</p>
-    ${TR.length ? '<p>中譯英：本站自編 50 組、100 句，參考解答由本站撰寫；評分方式依大考中心公布的學測英文非選擇題評分原則整理。</p>' : ''}
+    ${CZ.length ? `<p>綜合測驗：本站自編 ${CZ.length} 回、${CZ_N} 篇短文，題目、詳解與中譯皆由本站撰寫。</p>` : ''}
+    ${BK.length || PS.length ? `<p>文意選填 ${BK.length} 回（每回 10 格）、篇章結構 ${PS.length} 回（每回 4 格）：本站自編，文章、解析與中譯皆由本站撰寫。</p>` : ''}
     ${RD.length ? `<p>閱讀測驗：本站自編 ${RD.length} 回、${RD_N} 篇文章，題目、詳解與中譯皆由本站撰寫。</p>` : ''}
+    ${MX.length ? `<p>混合題：本站自編 ${MX.length} 回，題組形式參考 111–115 學年度學測，文章、題目、解析與中譯皆由本站撰寫。</p>` : ''}
+    ${TR.length ? '<p>中譯英：本站自編 50 組、100 句，參考解答由本站撰寫；評分方式依大考中心公布的學測英文非選擇題評分原則整理。</p>' : ''}
     <p>作答紀錄只存在你的裝置，不會上傳。</p>
   </section>`;
 }
@@ -669,7 +756,7 @@ function vTrans() {
   const done = trDoneN(), nx = trNextId();
   const ths = Object.keys(TR_TH).filter(k => TR.some(t => t.th === k));
   return `<div><a class="back" href="#practice">${ICON.left}練習</a>
-  <header class="top"><div><p class="eyebrow">第 4 種模式・${TR.length} 組 ${TR.length * 2} 句</p><h1>${TR_MODE.name}</h1></div><div class="chip-count"><b>${done}</b><span>/ ${TR.length} 組已練</span></div></header></div>
+  <header class="top"><div><p class="eyebrow">第 ${MODE_NO.trans} 種模式・${TR.length} 組 ${TR.length * 2} 句</p><h1>${TR_MODE.name}</h1></div><div class="chip-count"><b>${done}</b><span>/ ${TR.length} 組已練</span></div></header></div>
   <section class="card tr-intro">
     <p>照學測的形式，每組 2 句、前後主題相連。先自己寫，再看參考解答；可以打在格子裡，也可以寫在紙上。</p>
     <div class="btn-row"><button class="btn primary" type="button" data-act="trOpen" data-id="${nx}">${done ? `${done === TR.length ? '複習' : '繼續'}：第 ${nx} 組` : '從第 1 組開始'}</button></div>
@@ -734,6 +821,98 @@ function trShow() {
   S.tr.d[id] = t; save();
   TRS.shown = true; renderTr();
   setTimeout(() => { const a = $('#qbody .tr-ans'); if (a) a.scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }); }, 40);
+}
+
+/* ================= 綜合測驗 ================= */
+// S.cz.a["回-篇"] = 五個空格的作答（0–3，沒選是 -1）；S.cz.d["回-篇"] = [對答案那天, 答對題數]
+const czKey = (no, pi) => `${no}-${pi}`;
+const czDoneN = () => Object.keys(S.cz.d).length;
+const czSetDone = r => r.p.filter((_, k) => S.cz.d[czKey(r.no, k + 1)]).length;
+const czSetScore = r => r.p.reduce((n, _, k) => n + ((S.cz.d[czKey(r.no, k + 1)] || [])[1] || 0), 0);
+function czNext() {
+  for (const r of CZ) for (let k = 1; k <= r.p.length; k++) if (!S.cz.d[czKey(r.no, k)]) return [r.no, k];
+  return [CZ[0].no, 1];
+}
+function vCloze() {
+  const done = czDoneN(), [nn, nk] = czNext();
+  return `<div><a class="back" href="#practice">${ICON.left}練習</a>
+  <header class="top"><div><p class="eyebrow">第 ${MODE_NO.cloze} 種模式・${CZ.length} 回 ${CZ_N} 篇</p><h1>${CZ_MODE.name}</h1></div><div class="chip-count"><b>${done}</b><span>/ ${CZ_N} 篇已做</span></div></header></div>
+  <section class="card tr-intro">
+    <p>照學測綜合測驗的形式，每回 2 篇短文、每篇 5 個空格，每題 1 分，一回共 10 分。選好之後對答案，每題都有詳解和選項中譯，文法題會說明句子結構和其他選項錯在哪裡。</p>
+    <div class="btn-row"><button class="btn primary" type="button" data-act="czOpen" data-no="${nn}" data-pi="${nk}">${done ? `${done === CZ_N ? '複習' : '繼續'}：第 ${nn} 回第 ${nk} 篇` : '從第 1 回開始'}</button></div>
+  </section>
+  ${CZ.map(r => { const dn = czSetDone(r); return `<section class="sec-block"><h2>第 ${pad2(r.no)} 回<span>${dn ? `已做 ${dn} / ${r.p.length} 篇・答對 ${czSetScore(r)} / ${dn * 5} 題` : `${r.p.length} 篇 ${r.p.length * 5} 題`}</span></h2>
+    <div class="clist">${r.p.map((p, k) => { const d = S.cz.d[czKey(r.no, k + 1)];
+      return `<button class="crow" type="button" data-act="czOpen" data-no="${r.no}" data-pi="${k + 1}"><span class="no">${k + 1}</span><span class="t"><b>第 ${k + 1} 篇</b><small>第 ${k * 5 + 1}–${k * 5 + 5} 題・約 ${Math.round(p.wc / 10) * 10} 字</small></span><span class="pc">${d ? `<span class="tr-done">${d[1]} / 5</span>` : ''}</span></button>`; }).join('')}</div></section>`; }).join('')}`;
+}
+
+let CZS = null;
+function openCloze(no, pi) {
+  if (!CZ.length) return;
+  const r = CZ_BY.get(+no) || CZ[0];
+  CZS = { no: r.no, pi: Math.min(r.p.length, Math.max(1, +pi || 1)) };
+  openOverlay('cloze'); renderCz(true);
+}
+function czCur() { const r = CZ_BY.get(CZS.no), p = r.p[CZS.pi - 1], key = czKey(r.no, CZS.pi); return { r, p, key, base: (CZS.pi - 1) * 5, done: S.cz.d[key], ans: S.cz.a[key] || [-1, -1, -1, -1, -1] }; }
+// 文章中的空格：作答前顯示已選的字（點一下跳到那一題），對答案後顯示正確答案
+function czBlank(p, i, base, done, ans) {
+  const q = p.q[i], n = base + i + 1;
+  if (done) return `<span class="cz-b ${ans[i] === q.a ? 'ok' : 'no'}" id="czb${i}"><b>${n}</b><span>${esc(q.o[q.a])}</span></span>`;
+  return `<button type="button" class="cz-b${ans[i] >= 0 ? ' sel' : ''}" id="czb${i}" data-act="czJump" data-q="${i}" aria-label="第 ${n} 格${ans[i] >= 0 ? `，已選 ${q.o[ans[i]]}` : '，尚未作答'}"><b>${n}</b><span>${ans[i] >= 0 ? esc(q.o[ans[i]]) : '＿＿＿'}</span></button>`;
+}
+function renderCz(top) {
+  const { r, p, base, done, ans } = czCur();
+  const flat = []; CZ.forEach(x => x.p.forEach((_, k) => flat.push([x.no, k + 1])));
+  const idx = flat.findIndex(x => x[0] === r.no && x[1] === CZS.pi) + 1;
+  $('#qmode').textContent = CZ_MODE.name;
+  $('#qprog').textContent = `第 ${r.no} 回・第 ${CZS.pi} 篇`;
+  $('#qscore').innerHTML = done ? `<span class="${done[1] === 5 ? 'ok' : ''}">${done[1]} / 5</span>` : '';
+  $('#qfill').style.width = `${czDoneN() / CZ_N * 100}%`;
+  let h = `<p class="kicker">第 ${r.no} 回・第 ${CZS.pi} 篇（第 ${base + 1}–${base + 5} 題）</p>
+    ${done ? '' : '<p class="tr-ins">依文意選出最適當的答案。選好的字會填進文章的空格裡；點空格可以跳到那一題。</p>'}
+    <article class="rd-text cz-text">${p.text.map(x => `<p>${esc(x).replace(/\[(\d+)\]/g, (_, n) => czBlank(p, +n - base - 1, base, done, ans))}</p>`).join('')}</article>`;
+  h += p.q.map((q, i) => { const wide = Math.max(...q.o.map(o => o.length)) > 14;
+    return `<section class="czq" id="czq${i}">
+      <div class="czq-h"><span class="trn">${base + i + 1}.</span>${done ? `<b class="${ans[i] === q.a ? 'ok' : 'no'}">${ans[i] === q.a ? '答對' : `答錯・正解 (${'ABCD'[q.a]})`}</b><span class="rd-tag">${esc(q.t)}</span>` : ''}</div>
+      <div class="cz-opts${wide ? ' one' : ''}">${q.o.map((o, j) => `<button class="opt en${rdOptCls(done, q, ans[i], j)}" type="button" data-act="czPick" data-q="${i}" data-j="${j}" ${done ? 'disabled' : ''} aria-pressed="${ans[i] === j}"><span class="key">${'ABCD'[j]}</span><span class="t">${esc(o)}</span></button>`).join('')}</div>
+      ${done ? `<div class="rd-exp"><p>${q.e}</p>${q.z ? `<p class="rd-z">${esc(q.z)}</p>` : ''}</div>` : ''}
+    </section>`; }).join('');
+  if (!done) h += `<div class="btn-row"><button class="btn primary" type="button" data-act="czSubmit">對答案</button></div>`;
+  else h += `<section class="fb rd-res" id="czres"><div class="fb-h"><b>這篇答對 ${done[1]} / 5 題</b><button class="btn small" type="button" data-act="czRedo">重做這篇</button></div></section>
+    <details class="rd-more"><summary>全文中譯</summary><div class="rd-zh">${p.zh.map(x => `<p>${esc(x)}</p>`).join('')}</div></details>`;
+  h += `<div class="fnav"><button class="btn small" type="button" data-act="czGo" data-d="-1" ${idx > 1 ? '' : 'disabled'}>${ICON.left}上一篇</button><button class="btn small ghost" type="button" data-act="czList">全部題目</button><button class="btn small ${done ? 'primary' : ''}" type="button" data-act="czGo" data-d="1" ${idx < flat.length ? '' : 'disabled'}>下一篇${ICON.right}</button></div>`;
+  $('#qbody').innerHTML = h;
+  if (top) $('#quiz').scrollTop = 0;
+}
+function czPick(i, j) {
+  if (OV !== 'cloze' || !CZS) return;
+  const { p, key, base, done, ans } = czCur();
+  if (done) return;
+  const a = ans.slice(); a[i] = a[i] === j ? -1 : j;
+  if (a.some(x => x >= 0)) S.cz.a[key] = a; else delete S.cz.a[key];
+  save();
+  $$(`#czq${i} [data-act="czPick"]`).forEach(b => { const on = +b.dataset.j === a[i]; b.classList.toggle('sel', on); b.setAttribute('aria-pressed', on); });
+  const el = $('#czb' + i); if (el) el.outerHTML = czBlank(p, i, base, false, a);
+}
+function czJump(i) { const el = $('#czq' + i); if (el) el.scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }); }
+function czSubmit() {
+  if (OV !== 'cloze' || !CZS) return;
+  const { p, key, base, done, ans } = czCur();
+  if (done) return;
+  const miss = ans.findIndex(x => x < 0);
+  if (miss >= 0) { toast(`第 ${base + miss + 1} 題還沒作答`); czJump(miss); return; }
+  const c = p.q.filter((q, i) => ans[i] === q.a).length;
+  S.cz.a[key] = ans.slice(); S.cz.d[key] = [today(), c];
+  const rec = dayRec(); rec.q += p.q.length; rec.c += c;
+  save(); renderCz(true);
+}
+function czRedo() { if (!CZS) return; const { key } = czCur(); delete S.cz.a[key]; delete S.cz.d[key]; save(); TTS.stop(); renderCz(true); }
+function czGo(d) {
+  if (!CZS) return;
+  const flat = []; CZ.forEach(r => r.p.forEach((_, k) => flat.push([r.no, k + 1])));
+  const i = flat.findIndex(x => x[0] === CZS.no && x[1] === CZS.pi) + d;
+  if (i < 0 || i >= flat.length) return;
+  TTS.stop(); CZS = { no: flat[i][0], pi: flat[i][1] }; renderCz(true);
 }
 
 /* ================= 閱讀測驗 ================= */
@@ -823,11 +1002,259 @@ function rdGo(d) {
   TTS.stop(); RDS = { no: flat[i][0], pi: flat[i][1] }; renderRd(true);
 }
 
-const VIEWS = { home: vHome, practice: vPractice, words: vWords, wrong: vWrong, me: vMe, trans: vTrans, read: vRead };
+/* ================= 文意選填、篇章結構 ================= */
+// 兩種題型的作答方式相同：點文章裡的空格，從選項裡挑一個；每個選項只能用在一格。
+// S.bk.a[回] = 10 格各選了第幾個選項（0–9，沒填 -1），S.bk.d[回] = [對答案那天, 答對格數]；S.ps 一樣（4 格、選項 0–4）
+const PK = {
+  bank: { kind: 'bank', mode: BK_MODE, list: BK, by: BK_BY, key: 'bk', n: 10, L: 'ABCDEFGHIJ',
+    intro: '照學測文意選填的形式，每回 1 篇文章、10 個空格配 10 個選項，每個選項只用一次，每題 1 分。對答案之後，每一格都有詞性和解析，並附全文中譯。',
+    ins: '從 (A) 到 (J) 選出最適當的字詞填進空格，每個選項只用一次。點文章裡的空格選答案。' },
+  struct: { kind: 'struct', mode: PS_MODE, list: PS, by: PS_BY, key: 'ps', n: 4, L: 'ABCDE',
+    intro: '照 115 學年度學測篇章結構的形式，每回 1 篇文章、4 個空格配 5 個句子，其中 1 個句子用不到，每題 2 分。對答案之後，每一格都有解析，也會說明多出來的句子為什麼放不進去，並附全文中譯。',
+    ins: '從 (A) 到 (E) 選出最適當的句子填進空格，其中 1 個句子用不到。點文章裡的空格選答案。' },
+};
+const pkKey = (c, r) => c.kind === 'bank' ? r.q.map(q => q.a) : r.a;
+function pkNext(kind) { const c = PK[kind], st = S[c.key]; return (c.list.find(r => !st.d[r.no]) || c.list[0]).no; }
+function vPick(kind) {
+  const c = PK[kind], st = S[c.key], done = Object.keys(st.d).length, nx = pkNext(kind);
+  return `<div><a class="back" href="#practice">${ICON.left}練習</a>
+  <header class="top"><div><p class="eyebrow">第 ${MODE_NO[kind]} 種模式・${c.list.length} 回</p><h1>${c.mode.name}</h1></div><div class="chip-count"><b>${done}</b><span>/ ${c.list.length} 回已做</span></div></header></div>
+  <section class="card tr-intro">
+    <p>${c.intro}</p>
+    <div class="btn-row"><button class="btn primary" type="button" data-act="pkOpen" data-kind="${kind}" data-no="${nx}">${done ? `${done === c.list.length ? '複習' : '繼續'}：第 ${nx} 回` : '從第 1 回開始'}</button></div>
+  </section>
+  <section class="sec-block"><h2>全部 ${c.list.length} 回<span>${done ? `已做 ${done} 回・答對 ${dSum(st.d)} / ${done * c.n} 格` : `每回 ${c.n} 格`}</span></h2>
+    <div class="clist">${c.list.map(r => { const d = st.d[r.no];
+      return `<button class="crow" type="button" data-act="pkOpen" data-kind="${kind}" data-no="${r.no}"><span class="no">${pad2(r.no)}</span><span class="t"><b>${d ? esc(r.topic) : `第 ${r.no} 回`}</b><small>${c.n} 格・約 ${Math.round(r.wc / 10) * 10} 字</small></span><span class="pc">${d ? `<span class="tr-done">${d[1]} / ${c.n}</span>` : ''}</span></button>`; }).join('')}</div></section>`;
+}
+
+let PKS = null;
+function openPick(kind, no) {
+  const c = PK[kind]; if (!c || !c.list.length) return;
+  PKS = { kind, no: c.by.has(+no) ? +no : c.list[0].no, q: -1 };
+  openOverlay(kind); renderPk(true);
+}
+function pkCur() { const c = PK[PKS.kind], r = c.by.get(PKS.no), st = S[c.key]; return { c, r, st, done: st.d[r.no], ans: st.a[r.no] || Array(c.n).fill(-1), key: pkKey(c, r) }; }
+// 把一段文字切成句子（不用 lookbehind，舊版 Safari 才不會整支程式壞掉）
+function pkSents(t) {
+  const out = [], re = /[.!?]["”’)]*\s+/g; let last = 0, m;
+  while ((m = re.exec(t))) { out.push(t.slice(last, m.index + m[0].length).trim()); last = m.index + m[0].length; }
+  if (last < t.length) out.push(t.slice(last).trim());
+  return out.filter(Boolean);
+}
+// 文章中的空格。文意選填是一個字詞，用小方塊；篇章結構是一整句，填進去之後要能跟著文章換行
+function pkBlank(c, r, i, done, ans, key) {
+  const n = i + 1, pick = ans[i], shown = done ? key[i] : pick, bank = c.kind === 'bank';
+  const cls = done ? (pick === key[i] ? ' ok' : ' no') : pick >= 0 ? ' sel' : '';
+  const txt = shown >= 0 ? esc(r.o[shown]) : bank ? '＿＿＿' : '＿＿＿＿＿＿＿＿';
+  const lab = `第 ${n} 格${pick >= 0 ? `，已填 (${c.L[pick]}) ${esc(r.o[pick])}` : '，尚未作答'}`;
+  if (bank) return done ? `<span class="cz-b${cls}" id="pkb${i}"><b>${n}</b><span>${txt}</span></span>`
+    : `<button type="button" class="cz-b${cls}" id="pkb${i}" data-act="pkAsk" data-q="${i}" aria-label="${lab}"><b>${n}</b><span>${txt}</span></button>`;
+  return done ? `<span class="ps-b${cls}" id="pkb${i}"><b>${n}</b>${txt}</span>`
+    : `<span class="ps-b${cls}${pick < 0 ? ' empty' : ''}" id="pkb${i}" role="button" tabindex="0" data-act="pkAsk" data-q="${i}" aria-label="${lab}"><b>${n}</b>${txt}</span>`;
+}
+function pkBankHTML(c, r, ans) {
+  const at = j => ans.indexOf(j);
+  if (c.kind === 'bank') return `<div class="bk-bank" role="list" aria-label="選項">${r.o.map((o, j) => `<span role="listitem" class="${at(j) >= 0 ? 'used' : ''}"><b>(${c.L[j]})</b><i>${esc(o)}</i>${at(j) >= 0 ? `<em>第 ${at(j) + 1} 格</em>` : ''}</span>`).join('')}</div>`;
+  return `<div class="ps-opts" role="list" aria-label="選項">${r.o.map((o, j) => `<div role="listitem" class="ps-opt${at(j) >= 0 ? ' used' : ''}"><span class="key">${c.L[j]}</span><p>${esc(o)}${at(j) >= 0 ? `<em>已填在第 ${at(j) + 1} 格</em>` : ''}</p></div>`).join('')}</div>`;
+}
+function renderPk(top) {
+  const { c, r, st, done, ans, key } = pkCur();
+  const idx = c.list.indexOf(r) + 1, L = c.L, bank = c.kind === 'bank';
+  $('#qmode').textContent = c.mode.name;
+  $('#qprog').textContent = `第 ${r.no} 回 / ${c.list.length}`;
+  $('#qscore').innerHTML = done ? `<span class="${done[1] === c.n ? 'ok' : ''}">${done[1]} / ${c.n}</span>` : '';
+  $('#qfill').style.width = `${Object.keys(st.d).length / c.list.length * 100}%`;
+  let h = `<p class="kicker">第 ${r.no} 回（共 ${c.list.length} 回）${done ? `・${esc(r.topic)}` : ''}</p>`;
+  if (!done) h += `<p class="tr-ins">${c.ins}</p>${pkBankHTML(c, r, ans)}`;
+  h += `<article class="rd-text ${bank ? 'cz-text' : 'ps-text'}">${r.text.map(x => `<p>${esc(x).replace(/\[\[(\d+)\]\]/g, (_, n) => pkBlank(c, r, +n - 1, done, ans, key))}</p>`).join('')}</article>`;
+  if (!done) h += `<div class="btn-row"><button class="btn primary" type="button" data-act="pkSubmit">對答案</button></div>`;
+  else {
+    const res = i => `<b class="${ans[i] === key[i] ? 'ok' : 'no'}">${ans[i] === key[i] ? '答對' : `答錯・你填的是 (${L[ans[i]]})${bank ? ' ' + esc(r.o[ans[i]]) : ''}`}</b>`;
+    h += key.map((k, i) => `<section class="czq pkq" id="pkq${i}">
+      <div class="czq-h"><span class="trn">${i + 1}.</span><b class="pk-w">(${L[k]})${bank ? ' ' + esc(r.o[k]) : ''}</b>${bank ? `<span class="rd-tag">${esc(r.q[i].pos)}</span>` : ''}</div>
+      ${bank ? '' : `<p class="ps-sent">${esc(r.o[k])}</p>`}
+      <div class="rd-exp"><div class="rd-exp-h">${res(i)}</div><p>${esc(bank ? r.q[i].e : r.e[i])}</p></div></section>`).join('');
+    if (!bank) h += `<section class="czq pkq" id="pkqx"><div class="czq-h"><b class="pk-w">(${L[r.x[0]]})</b><span class="rd-tag">用不到的句子</span></div><p class="ps-sent">${esc(r.o[r.x[0]])}</p><div class="rd-exp"><p>${esc(r.x[1])}</p></div></section>`;
+    h += `<section class="fb rd-res" id="pkres"><div class="fb-h"><b>這回答對 ${done[1]} / ${c.n} 格</b><button class="btn small" type="button" data-act="pkRedo">重做這回</button></div>
+      <p class="rd-src"><span class="lab">題材</span>${esc(r.topic)}</p></section>
+    <details class="rd-more"><summary>全文中譯</summary><div class="rd-zh">${r.zh.map(x => `<p>${esc(x)}</p>`).join('')}</div></details>`;
+  }
+  h += `<div class="fnav"><button class="btn small" type="button" data-act="pkGo" data-d="-1" ${idx > 1 ? '' : 'disabled'}>${ICON.left}上一回</button><button class="btn small ghost" type="button" data-act="pkList">全部題目</button><button class="btn small ${done ? 'primary' : ''}" type="button" data-act="pkGo" data-d="1" ${idx < c.list.length ? '' : 'disabled'}>下一回${ICON.right}</button></div>`;
+  $('#qbody').innerHTML = h;
+  if (top) $('#quiz').scrollTop = 0;
+}
+// 點空格：從底部面板選答案。面板會蓋住文章，所以把空格前後的句子一起帶上去
+function pkAsk(i) {
+  if (!PKS || OV !== PKS.kind) return;
+  const { c, r, done, ans } = pkCur(); if (done || !(i >= 0 && i < c.n)) return;
+  PKS.q = i;
+  const L = c.L, tag = `[[${i + 1}]]`, par = r.text.find(x => x.includes(tag)) || '';
+  const fillIn = s => esc(s).replace(/\[\[(\d+)\]\]/g, (_, n) => +n === i + 1 ? `<mark>（${n}）＿＿＿</mark>` : ans[n - 1] >= 0 ? `<u>${esc(r.o[ans[n - 1]])}</u>` : `（${n}）＿＿＿`);
+  let ctx;
+  if (c.kind === 'bank') ctx = `<p class="bk-ctx">${fillIn(pkSents(par).find(s => s.includes(tag)) || par)}</p>`;
+  else {
+    const at = par.indexOf(tag), a = pkSents(par.slice(0, at)).pop(), b = pkSents(par.slice(at + tag.length))[0];
+    ctx = `<div class="bk-ctx ps-ctx"><p><span class="lab">前一句</span>${a ? fillIn(a) : '（這一格在段落開頭）'}</p><p><mark>（${i + 1}）＿＿＿＿＿＿</mark></p><p><span class="lab">後一句</span>${b ? fillIn(b) : '（這一格在段落結尾）'}</p></div>`;
+  }
+  const opts = r.o.map((o, j) => { const at = ans.indexOf(j);
+    return `<button class="opt en${ans[i] === j ? ' sel' : at >= 0 ? ' used' : ''}" type="button" data-act="pkChoose" data-j="${j}" aria-pressed="${ans[i] === j}"><span class="key">${L[j]}</span><span class="t">${esc(o)}${at >= 0 && at !== i ? `<small>已填在第 ${at + 1} 格</small>` : ''}</span></button>`; }).join('');
+  openSheet(`<h2 id="sheetTitle">第 ${i + 1} 格</h2>${ctx}<div class="${c.kind === 'bank' ? 'bk-pick' : 'ps-pick'}">${opts}</div>${ans[i] >= 0 ? '<div class="btn-row"><button class="btn small" type="button" data-act="pkClear">清除這一格</button></div>' : ''}`);
+}
+function pkChoose(j) {
+  if (!PKS || OV !== PKS.kind || PKS.q < 0) return;
+  const { c, r, st, done, ans } = pkCur(); if (done) return;
+  const a = ans.slice(), i = PKS.q;
+  if (!(j >= 0 && j < r.o.length) || a[i] === j) a[i] = -1;
+  else { const at = a.indexOf(j); if (at >= 0) a[at] = -1; a[i] = j; }   // 每個選項只能用在一格
+  if (a.some(x => x >= 0)) st.a[r.no] = a; else delete st.a[r.no];
+  save(); closeSheet(); renderPk(false);
+  const el = $('#pkb' + i); if (el) el.scrollIntoView({ block: 'nearest' });
+}
+function pkSubmit() {
+  if (!PKS || OV !== PKS.kind) return;
+  const { c, r, st, done, ans, key } = pkCur(); if (done) return;
+  const miss = ans.findIndex(x => x < 0);
+  if (miss >= 0) { toast(`第 ${miss + 1} 格還沒填`); const el = $('#pkb' + miss); if (el) el.scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }); return; }
+  const n = ans.filter((x, i) => x === key[i]).length;
+  st.a[r.no] = ans.slice(); st.d[r.no] = [today(), n];
+  const rec = dayRec(); rec.q += c.n; rec.c += n;
+  save(); renderPk(true);
+}
+function pkRedo() { if (!PKS) return; const { r, st } = pkCur(); delete st.a[r.no]; delete st.d[r.no]; save(); renderPk(true); }
+function pkGo(d) {
+  if (!PKS) return;
+  const c = PK[PKS.kind], i = c.list.findIndex(x => x.no === PKS.no) + d;
+  if (i < 0 || i >= c.list.length) return;
+  PKS = { kind: PKS.kind, no: c.list[i].no, q: -1 }; renderPk(true);
+}
+
+/* ================= 混合題 ================= */
+// S.mx.a[回] = { f: [第 47 格, 第 48 格], m: 多選選的代號（例如 "ACF"）, s: 簡答 }
+// S.mx.d[回] = [對答案那天, 答對題數 0–4（47、48、49、50 各算一題）, 簡答自己判定算對 0/1]
+const MX_TYPE = { F: '論壇留言', P: '兩篇短文', L: '列舉資訊' };
+const mxTopic = r => r.topic.replace(/（[^（）]*）$/, '');
+function mxNext() { return (MX.find(r => !S.mx.d[r.no]) || MX[0]).no; }
+function vMixed() {
+  const done = Object.keys(S.mx.d).length, nx = mxNext();
+  return `<div><a class="back" href="#practice">${ICON.left}練習</a>
+  <header class="top"><div><p class="eyebrow">第 ${MODE_NO.mixed} 種模式・${MX.length} 回</p><h1>${MX_MODE.name}</h1></div><div class="chip-count"><b>${done}</b><span>/ ${MX.length} 回已做</span></div></header></div>
+  <section class="card tr-intro">
+    <p>照學測混合題的形式，每回 1 個題組，有三種：論壇留言、兩篇短文對照、列舉資訊。題目是填充 2 格、多選 1 題、簡答 1 題。填充要從文章裡找字，並依句子改變字形。對答案之後有解析和全文中譯。</p>
+    <div class="btn-row"><button class="btn primary" type="button" data-act="mxOpen" data-no="${nx}">${done ? `${done === MX.length ? '複習' : '繼續'}：第 ${nx} 回` : '從第 1 回開始'}</button></div>
+  </section>
+  <section class="sec-block"><h2>全部 ${MX.length} 回<span>${done ? `已做 ${done} 回・答對 ${dSum(S.mx.d)} / ${done * 4} 題` : '每回 4 題'}</span></h2>
+    <div class="clist">${MX.map(r => { const d = S.mx.d[r.no];
+      return `<button class="crow" type="button" data-act="mxOpen" data-no="${r.no}"><span class="no">${pad2(r.no)}</span><span class="t"><b>${d ? esc(mxTopic(r)) : `第 ${r.no} 回`}</b><small>${MX_TYPE[r.type]}・填充、多選、簡答</small></span><span class="pc">${d ? `<span class="tr-done">${d[1]} / 4</span>` : ''}</span></button>`; }).join('')}</div></section>`;
+}
+
+let MXS = null;
+function openMixed(no) {
+  if (!MX.length) return;
+  MXS = { no: MX_BY.has(+no) ? +no : MX[0].no };
+  openOverlay('mixed'); renderMx(true);
+}
+function mxCur() { const r = MX_BY.get(MXS.no); return { r, done: S.mx.d[r.no], ans: S.mx.a[r.no] || { f: ['', ''], m: '', s: '' } }; }
+function renderMx(top) {
+  const { r, done, ans } = mxCur(), g = done ? mxGrade(r, ans) : null, keys = mxKeys(r), idx = MX.indexOf(r) + 1;
+  $('#qmode').textContent = MX_MODE.name;
+  $('#qprog').textContent = `第 ${r.no} 回 / ${MX.length}`;
+  $('#qscore').innerHTML = done ? `<span class="${done[1] === 4 ? 'ok' : ''}">${done[1]} / 4</span>` : '';
+  $('#qfill').style.width = `${Object.keys(S.mx.d).length / MX.length * 100}%`;
+  const paras = t => t.split('\n').map(x => `<p>${esc(x)}</p>`).join('');
+  let h = `<p class="kicker">第 ${r.no} 回（共 ${MX.length} 回）・${MX_TYPE[r.type]}${done ? `・${esc(mxTopic(r))}` : ''}</p>
+    <p class="mx-intro">${esc(r.intro)}</p>`;
+  h += r.type === 'P' ? r.b.map(b => `<article class="rd-text mx-text"><h3>${esc(b.h)}</h3>${paras(b.t)}</article>`).join('')
+    : `<div class="mx-posts">${r.b.map(b => `<div class="mx-post"><span class="key">${b.k}</span><div><h3>${esc(b.h)}</h3>${paras(b.t)}</div></div>`).join('')}</div>`;
+  // 47–48 填充
+  const fin = i => done ? `<span class="mx-ans ${g.f[i] ? 'ok' : 'no'}"><b>${47 + i}</b>${mxNorm(ans.f[i]) ? esc(ans.f[i]) : '（沒填）'}</span>`
+    : `<span class="mx-inw"><b>${47 + i}</b><input class="mx-in" id="mxf${i}" data-mx="f${i}" type="text" value="${esc(ans.f[i])}" maxlength="40" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" aria-label="第 ${47 + i} 格"></span>`;
+  h += `<section class="mxq" id="mxq0"><div class="mxq-h"><b class="trn">47–48</b><span class="rd-tag">填充</span></div>
+    ${done ? '' : '<p class="tr-ins">從文章裡找出最適當的單詞（word）填進空格，並依句子結構改變字形。每格只能填一個單詞。</p>'}
+    <p class="mx-fill">${esc(r.f.s).replace(/__(47|48)__/g, (_, n) => fin(+n - 47))}</p>
+    ${done ? r.f.a.map((x, i) => `<div class="rd-exp"><div class="rd-exp-h"><b class="${g.f[i] ? 'ok' : 'no'}">${47 + i}. ${g.f[i] ? '答對' : '答錯'}・正解 <i>${esc(x.w.join(' / '))}</i></b><span class="rd-tag">原文 ${esc(x.src)}</span></div><p>${esc(x.e)}</p></div>`).join('') : ''}</section>`;
+  // 49 多選
+  const sel = k => ans.m.includes(k), right = k => r.m.a.includes(k);
+  const mcls = k => !done ? (sel(k) ? ' sel' : '') : right(k) ? (sel(k) ? ' ok' : ' miss') : sel(k) ? ' no' : ' dim';
+  h += `<section class="mxq" id="mxq1"><div class="mxq-h"><b class="trn">49</b><span class="rd-tag">多選</span></div>
+    <p class="rd-stem"><span>${esc(r.m.s)}</span></p>
+    ${done ? '' : '<p class="tr-ins">答案不只一個，全部選對才算答對。</p>'}
+    ${r.m.o.length ? `<div class="opts">${r.m.o.map((o, j) => `<button class="opt en${mcls(keys[j])}" type="button" data-act="mxPick" data-c="${keys[j]}" ${done ? 'disabled' : ''} aria-pressed="${sel(keys[j])}"><span class="key">${keys[j]}</span><span class="t">${esc(o)}</span></button>`).join('')}</div>`
+      : `<div class="mx-letters">${r.b.map(b => `<button class="mx-l${mcls(b.k)}" type="button" data-act="mxPick" data-c="${b.k}" ${done ? 'disabled' : ''} aria-pressed="${sel(b.k)}"><b>${b.k}</b>${esc(b.h)}</button>`).join('')}</div>`}
+    ${done ? `<div class="rd-exp"><div class="rd-exp-h"><b class="${g.m ? 'ok' : 'no'}">${g.m ? '答對' : '答錯'}・正解 ${r.m.a.split('').join('、')}</b></div><p>${esc(r.m.e)}</p>${g.m ? '' : '<p class="rd-z">綠色實線是選對的，綠色虛線是漏選的，紅色是選錯的。</p>'}</div>` : ''}</section>`;
+  // 50 簡答
+  const wrote = !!mxNorm(ans.s);
+  h += `<section class="mxq" id="mxq2"><div class="mxq-h"><b class="trn">50</b><span class="rd-tag">簡答</span></div>
+    <p class="rd-stem"><span>${esc(r.s.s)}</span></p>
+    ${done ? `<div class="tr-mine"><span class="lab">你的答案</span><p class="en">${wrote ? esc(ans.s) : '（沒寫）'}</p></div>
+      <div class="rd-exp"><div class="rd-exp-h"><b class="${g.s || done[2] ? 'ok' : 'no'}">${g.s ? '答對' : done[2] ? '自己判定算對' : wrote ? '和參考答案不同' : '沒有作答'}・參考答案 <i>${esc(r.s.a[0])}</i></b></div><p>${esc(r.s.e)}</p>
+      ${g.s || !wrote ? '' : `<div class="mx-self"><span>${done[2] ? '已經改成算對。' : '如果意思和參考答案一樣、拼字也正確，可以自己改成算對。'}</span><button class="btn small" type="button" data-act="mxSelf">${done[2] ? '改回算錯' : '我寫對了'}</button></div>`}</div>`
+      : `<input class="mx-short" id="mxs" data-mx="s" type="text" value="${esc(ans.s)}" maxlength="200" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" placeholder="在這裡寫答案" aria-label="第 50 題的答案">`}</section>`;
+  if (!done) h += `<div class="btn-row"><button class="btn primary" type="button" data-act="mxSubmit">對答案</button></div>`;
+  else h += `<section class="fb rd-res" id="mxres"><div class="fb-h"><b>這回答對 ${done[1]} / 4 題</b><button class="btn small" type="button" data-act="mxRedo">重做這回</button></div>
+      <p class="rd-src"><span class="lab">題材</span>${esc(mxTopic(r))}</p></section>
+    <details class="rd-more"><summary>全文中譯</summary><div class="rd-zh">${r.zh.map(x => `<p>${esc(x)}</p>`).join('')}</div></details>`;
+  h += `<div class="fnav"><button class="btn small" type="button" data-act="mxGo" data-d="-1" ${idx > 1 ? '' : 'disabled'}>${ICON.left}上一回</button><button class="btn small ghost" type="button" data-act="mxList">全部題目</button><button class="btn small ${done ? 'primary' : ''}" type="button" data-act="mxGo" data-d="1" ${idx < MX.length ? '' : 'disabled'}>下一回${ICON.right}</button></div>`;
+  $('#qbody').innerHTML = h;
+  if (top) $('#quiz').scrollTop = 0;
+}
+function mxStore(r, a, lazy) {
+  if (a.f[0] || a.f[1] || a.m || a.s) S.mx.a[r.no] = a; else delete S.mx.a[r.no];
+  if (lazy) { clearTimeout(trSaveT); trSaveT = setTimeout(() => { trSaveT = 0; save(); }, 400); } else save();
+}
+function mxInput(el) {
+  if (OV !== 'mixed' || !MXS) return;
+  const { r, done, ans } = mxCur(); if (done) return;
+  const a = { f: ans.f.slice(), m: ans.m, s: ans.s }, k = el.dataset.mx;
+  if (k === 's') a.s = el.value.slice(0, 200); else if (k === 'f0' || k === 'f1') a.f[+k[1]] = el.value.slice(0, 40); else return;
+  mxStore(r, a, true);
+}
+function mxPick(k) {
+  if (OV !== 'mixed' || !MXS) return;
+  const { r, done, ans } = mxCur(); if (done || !mxKeys(r).includes(k) || k.length !== 1) return;
+  const set = new Set(ans.m.split('')); if (set.has(k)) set.delete(k); else set.add(k);
+  const a = { f: ans.f.slice(), m: [...set].sort().join(''), s: ans.s };
+  mxStore(r, a);
+  $$('#mxq1 [data-act="mxPick"]').forEach(b => { const on = a.m.includes(b.dataset.c); b.classList.toggle('sel', on); b.setAttribute('aria-pressed', on); });
+}
+async function mxSubmit() {
+  if (OV !== 'mixed' || !MXS) return;
+  trFlush();
+  const { r, done, ans } = mxCur(); if (done) return;
+  const a = { f: ans.f.map(x => x.trim()), m: ans.m, s: ans.s.trim() };
+  const miss = [!a.f[0] && '47', !a.f[1] && '48', !a.m && '49', !a.s && '50'].filter(Boolean);
+  if (miss.length === 4) { toast('還沒有作答'); return; }
+  if (miss.length && !await ask(`第 ${miss.join('、')} 題還沒作答，要直接對答案嗎？`, '對答案', '繼續作答')) return;
+  if (OV !== 'mixed' || !MXS || MXS.no !== r.no || S.mx.d[r.no]) return;   // 對話框開著的時候已經離開這一回
+  const g = mxGrade(r, a);
+  S.mx.a[r.no] = a; S.mx.d[r.no] = [today(), g.n, 0];
+  const rec = dayRec(); rec.q += 4; rec.c += g.n;
+  save(); renderMx(true);
+}
+// 簡答題和參考答案不完全一樣時，讓學生自己判定；只在對答案當天同步調整當天的答對數
+function mxSelf() {
+  if (OV !== 'mixed' || !MXS) return;
+  const { r, done, ans } = mxCur(); if (!done) return;
+  const g = mxGrade(r, ans); if (g.s || !mxNorm(ans.s)) return;
+  const v = done[2] ? 0 : 1;
+  if (done[0] === today()) { const rec = dayRec(); rec.c = Math.max(0, rec.c + (v ? 1 : -1)); }
+  S.mx.d[r.no] = [done[0], g.n + v, v]; save(); renderMx(false);
+}
+function mxRedo() { if (!MXS) return; const { r } = mxCur(); delete S.mx.a[r.no]; delete S.mx.d[r.no]; save(); renderMx(true); }
+function mxGo(d) {
+  if (!MXS) return;
+  const i = MX.findIndex(x => x.no === MXS.no) + d;
+  if (i < 0 || i >= MX.length) return;
+  trFlush(); MXS = { no: MX[i].no }; renderMx(true);
+}
+
+const VIEWS = { home: vHome, practice: vPractice, words: vWords, wrong: vWrong, me: vMe, trans: vTrans, cloze: vCloze, read: vRead,
+  bank: () => BK.length ? vPick('bank') : vPractice(), struct: () => PS.length ? vPick('struct') : vPractice(), mixed: () => MX.length ? vMixed() : vPractice() };
+const SET_VIEWS = ['trans', 'cloze', 'read', 'bank', 'struct', 'mixed'];
 function render() {
   const el = $('#view');
   el.innerHTML = view === 'card' ? vCard(cardNo) : VIEWS[view]();
-  const tab = view === 'card' ? 'words' : view === 'trans' || view === 'read' ? 'practice' : view;
+  const tab = view === 'card' ? 'words' : SET_VIEWS.includes(view) ? 'practice' : view;
   $$('.tabs a').forEach(a => { if (a.dataset.tab === tab) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
 }
 function route() {
@@ -845,7 +1272,7 @@ let Q = null, OV = null, autoT = 0;
 function openOverlay(kind) { OV = kind; $('#quiz').hidden = false; document.body.style.overflow = 'hidden'; $('#quiz').scrollTop = 0; }
 function closeOverlay() {
   trFlush();
-  OV = null; Q = null; F = null; TRS = null; RDS = null; clearInterval(mockTimer); clearTimeout(autoT); TTS.stop();
+  OV = null; Q = null; F = null; TRS = null; CZS = null; RDS = null; PKS = null; MXS = null; clearInterval(mockTimer); clearTimeout(autoT); TTS.stop();
   if (M && !M.done) M = null;
   $('#quiz').hidden = true; document.body.style.overflow = ''; render();
 }
@@ -1165,6 +1592,14 @@ const ACT = {
   trGo: el => { const id = +el.dataset.id; if (!TRS || !TR_BY.has(id)) return; trFlush(); TTS.stop(); TRS = { id, shown: false }; renderTr(); },
   trShow: () => trShow(),
   trList: () => { closeOverlay(); go('trans'); },
+  czNext: () => { const [no, pi] = czNext(); openCloze(no, pi); },
+  czOpen: el => openCloze(+el.dataset.no, +el.dataset.pi),
+  czPick: el => czPick(+el.dataset.q, +el.dataset.j),
+  czJump: el => czJump(+el.dataset.q),
+  czSubmit: () => czSubmit(),
+  czRedo: () => czRedo(),
+  czGo: el => czGo(+el.dataset.d),
+  czList: () => { closeOverlay(); go('cloze'); },
   rdNext: () => { const [no, pi] = rdNext(); openRead(no, pi); },
   rdOpen: el => openRead(+el.dataset.no, +el.dataset.pi),
   rdPick: el => rdPick(+el.dataset.q, +el.dataset.j),
@@ -1172,6 +1607,24 @@ const ACT = {
   rdRedo: () => rdRedo(),
   rdGo: el => rdGo(+el.dataset.d),
   rdList: () => { closeOverlay(); go('read'); },
+  bkNext: () => openPick('bank', pkNext('bank')),
+  psNext: () => openPick('struct', pkNext('struct')),
+  pkOpen: el => openPick(el.dataset.kind, +el.dataset.no),
+  pkAsk: el => pkAsk(+el.dataset.q),
+  pkChoose: el => pkChoose(+el.dataset.j),
+  pkClear: () => pkChoose(-1),
+  pkSubmit: () => pkSubmit(),
+  pkRedo: () => pkRedo(),
+  pkGo: el => pkGo(+el.dataset.d),
+  pkList: () => { const k = PKS && PKS.kind; closeOverlay(); if (k) go(k); },
+  mxNext: () => openMixed(mxNext()),
+  mxOpen: el => openMixed(+el.dataset.no),
+  mxPick: el => mxPick(el.dataset.c),
+  mxSubmit: () => mxSubmit(),
+  mxSelf: () => mxSelf(),
+  mxRedo: () => mxRedo(),
+  mxGo: el => mxGo(+el.dataset.d),
+  mxList: () => { closeOverlay(); go('mixed'); },
   resume: () => { if (!S.sess) return; Q = S.sess; openOverlay('quiz'); if (Q.a) nextQ(); else renderQ(); },
   dropResume: () => { S.sess = null; save(); render(); },
   setMode: el => { S.setup.mode = el.dataset.m; save(); render(); },
@@ -1286,6 +1739,7 @@ document.addEventListener('submit', e => { if (e.target.matches('[data-form="typ
 document.addEventListener('input', e => {
   if (e.target.id === 'q') { searchQ = e.target.value; const r = $('#results'); if (r) r.innerHTML = searchQ.trim() ? resultsHTML() : sectionsHTML(); }
   else if (e.target.dataset && e.target.dataset.tr) trInput(e.target);
+  else if (e.target.dataset && e.target.dataset.mx) mxInput(e.target);
 });
 document.addEventListener('change', e => {
   const el = e.target;
@@ -1302,6 +1756,8 @@ document.addEventListener('change', e => {
 document.addEventListener('keydown', e => {
   if (!$('#dialog').hidden) { if (e.key === 'Escape' && dlgDone) dlgDone(false); return; }
   if (!$('#sheet').hidden) { if (e.key === 'Escape') closeSheet(); return; }
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('span[role="button"][data-act]')) { e.preventDefault(); e.target.click(); return; }
+  if (OV === 'mixed' && e.key === 'Enter' && e.target.dataset && e.target.dataset.mx) { e.preventDefault(); const nx = e.target.dataset.mx === 'f0' ? $('#mxf1') : null; if (nx) nx.focus(); else e.target.blur(); return; }
   if (!OV) return;
   const tag = e.target.tagName, typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
   if (e.key === 'Escape') { ACT.quit(); return; }
@@ -1334,5 +1790,5 @@ if (ENV !== 'artifact' && 'serviceWorker' in navigator && (location.protocol ===
   window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
 }
 // 給自動測試用
-window.__app = { get S() { return S; }, normalize, render, go, openWord, W, ORIG, PAST, PAST_BY, CARDS, ACT, makeQ, pickDistractors, record, rangeWords, startQuiz, startMock, pick, submitTyping, nextQ, rate, get Q() { return Q; }, get M() { return M; }, get F() { return F; }, lvl, levelCounts, searchWords, mixType, clash, TR, openTrans, get TRS() { return TRS; } };
+window.__app = { get S() { return S; }, normalize, render, go, openWord, W, ORIG, PAST, PAST_BY, CARDS, ACT, makeQ, pickDistractors, record, rangeWords, startQuiz, startMock, pick, submitTyping, nextQ, rate, get Q() { return Q; }, get M() { return M; }, get F() { return F; }, lvl, levelCounts, searchWords, mixType, clash, TR, openTrans, get TRS() { return TRS; }, CZ, RD, BK, PS, MX, SETS, MODE_NO, openPick, openMixed, mxGrade, mxNorm, pkSents, get PKS() { return PKS; }, get MXS() { return MXS; }, get OV() { return OV; } };
 })();

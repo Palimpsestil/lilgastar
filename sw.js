@@ -1,6 +1,6 @@
 // 離線快取：第一次打開後，沒有網路也能練習。版本號由 build.py 填入，網站更新時自動換新快取。
-const CACHE = 'gsat1800-a23fd80f';
-const CORE = ['./', './index.html', './app.css?v=a23fd80f', './app.js?v=a23fd80f', './data.js?v=a23fd80f', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
+const CACHE = 'gsat1800-7f824868';
+const CORE = ['./', './index.html', './app.css?v=7f824868', './app.js?v=7f824868', './data.js?v=7f824868', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(CORE)).then(() => self.skipWaiting()));
