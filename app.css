@@ -577,3 +577,33 @@ button.cz-b:hover{border-color:var(--blue)}
 .mx-self{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;border-top:1px solid var(--line2);padding-top:8px;font-size:.86rem;color:var(--muted)}
 .mx-self span{flex:1 1 12em;min-width:0}
 .rd-exp-h b i{font-weight:600}
+
+/* 題組弱點分析：每一類一列（名稱、答對數、正確率），下面一條細橫條；有答錯的那幾類可以點進去看題目 */
+.wk{display:flex;flex-direction:column;gap:16px}
+.wk-m{display:flex;flex-direction:column}
+.wk-mh{display:flex;align-items:baseline;justify-content:space-between;gap:8px;padding-bottom:2px}
+.wk-mh b{font-size:.95rem}
+.wk-mh span{font-size:.78rem;color:var(--muted)}
+.wk-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto 16px;column-gap:10px;row-gap:6px;align-items:center;width:100%;padding:9px 0;border:0;border-top:1px solid var(--line);background:transparent;text-align:left;color:inherit;font-size:.92rem}
+.wk-m > .wk-row:first-child{border-top:0}
+.wk-n{min-width:0;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.wk-tag{font-style:normal;font-size:.7rem;font-weight:600;line-height:1.5;padding:0 8px;border-radius:999px;background:var(--rose-soft);color:var(--rose-ink);white-space:nowrap}
+.wk-c{font-size:.8rem;color:var(--muted);white-space:nowrap}
+.wk-p{min-width:2.9em;text-align:right;font-weight:600;color:var(--sage-ink)}
+.wk-row.mid .wk-p{color:var(--gold-ink)}
+.wk-row.lo .wk-p{color:var(--rose-ink)}
+.wk-p.few{min-width:0;font-weight:500;font-size:.76rem;color:var(--muted);white-space:nowrap}
+.wk-go{display:flex;align-items:center;color:var(--muted)}
+.wk-go svg{width:16px;height:16px}
+.wk-bar{grid-column:1 / -1;height:6px;border-radius:3px;background:var(--surface2);overflow:hidden}
+.wk-bar i{display:block;height:100%;border-radius:3px;background:var(--sage)}
+.wk-row.mid .wk-bar i{background:var(--gold)}
+.wk-row.lo .wk-bar i{background:var(--rose)}
+.wk-note{font-size:.78rem;line-height:1.6;color:var(--muted);margin-top:12px}
+.wk-rec{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:14px;padding:11px 12px;border-radius:12px;background:var(--surface2)}
+.wk-rec p{font-size:.86rem;line-height:1.55;min-width:0}
+.wk-rec .btn{flex:none;background:var(--surface)}
+.wk-f{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:.88rem;color:var(--muted)}
+.wk-t{font-style:normal;font-weight:600;color:var(--plum);margin-right:6px}
+.wk-q .pc{min-width:0}
+.clist + .wk-note{margin-top:-6px}

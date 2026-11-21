@@ -545,7 +545,7 @@ function vHome() {
     <div class="modes3 home">${MAIN_MODES.map((id, k) => `<button class="mode main" type="button" data-act="quickMode" data-m="${id}"><span class="mnum">${k + 1}</span><b>${TYPES[id].name}</b><span>${TYPES[id].desc}</span></button>`).join('')}${SETS.map(x => `<button class="mode main" type="button" data-act="${x.next}"><span class="mnum">${MODE_NO[x.id]}</span><b>${x.m.name}</b><span>${x.m.desc}</span></button>`).join('')}</div>
   </section>
   <section class="quick">
-    <button type="button" data-act="go" data-to="wrong"><b class="num">${wrongN}</b>錯題本</button>
+    <button type="button" data-act="goWrong"><b class="num">${wrongN}</b>錯題本</button>
     <button type="button" data-act="mockNow"><b class="num">10 題</b>模擬考</button>
     <button type="button" data-act="goFav"><b class="num">${Object.keys(S.fav).length}</b>收藏</button>
   </section>
@@ -661,7 +661,11 @@ function listWords(tab) {
   return W.filter(isWrong);
 }
 function vWrong() {
-  const tabs = [['wrong', '錯題'], ['fav', '收藏'], ['grad', '已畢業']];
+  const tabs = [['wrong', '錯題'], ['fav', '收藏'], ['grad', '已畢業'], ['sets', '題組']];
+  const tabN = k => k === 'sets' ? wkWrong().length : listWords(k).length;
+  const head = `<header class="top"><div><p class="eyebrow">我的清單</p><h1>錯題本與收藏</h1></div></header>
+  <div class="chips" role="tablist">${tabs.map(([k, n]) => `<button class="chip" type="button" role="tab" data-act="listTab" data-v="${k}" aria-pressed="${listTab === k}" aria-selected="${listTab === k}">${n} ${tabN(k)}</button>`).join('')}</div>`;
+  if (listTab === 'sets') return head + wkListHTML();   // 題組的答錯題目另外列（前三個分頁是單字）
   let list = listWords(listTab);
   if (listTab !== 'fav') list = list.slice().sort((a, b) => { const x = S.w[a.w], y = S.w[b.w]; return listSort === 'often' ? (y.x - x.x) || (y.lw - x.lw) : (y.lw - x.lw) || (y.x - x.x); });
   const meta = w => { const s = S.w[w.w]; return listTab === 'fav' ? `第 ${w.g} 組` : `錯 ${s.x} 次・${md(s.lw)}`; };
@@ -670,8 +674,7 @@ function vWrong() {
     fav: '還沒有收藏。看到想加強的字，點星號就會收進這裡。',
     grad: '答錯後又練會的字會移到這裡。',
   }[listTab];
-  return `<header class="top"><div><p class="eyebrow">我的清單</p><h1>錯題本與收藏</h1></div></header>
-  <div class="chips" role="tablist">${tabs.map(([k, n]) => `<button class="chip" type="button" role="tab" data-act="listTab" data-v="${k}" aria-pressed="${listTab === k}" aria-selected="${listTab === k}">${n} ${listWords(k).length}</button>`).join('')}</div>
+  return `${head}
   ${list.length ? `
   <div class="btn-row"><button class="btn primary" type="button" data-act="listQuiz">練習這 ${list.length} 個字</button><button class="btn" type="button" data-act="listCards">看字卡</button><button class="btn" type="button" data-act="copyList">複製清單</button></div>
   ${listTab !== 'fav' ? `<div class="chips">${[['recent', '最近答錯'], ['often', '最常答錯']].map(([k, n]) => `<button class="chip" type="button" data-act="listSort" data-v="${k}" aria-pressed="${listSort === k}">${n}</button>`).join('')}</div>` : ''}
@@ -712,6 +715,7 @@ function vMe() {
   <section class="card"><div class="sec-h"><h2>1800 字掌握度</h2></div>${mbar(L)}${legend(L)}
     <p class="muted" style="font-size:.8rem;margin-top:10px">答對一次升一級，同一天只升一次；間隔 1、2、4、7、15、30 天再考。答錯回到「學習中」，並收進錯題本。</p></section>
   ${modes ? `<section class="card"><div class="sec-h"><h2>各題型紀錄</h2></div><div class="kv">${modes}</div></section>` : ''}
+  ${wkCard()}
   ${often.length ? `<section class="card"><div class="sec-h"><h2>最常答錯</h2></div><div class="wlist">${often.map(w => wordRow(w, `錯 ${S.w[w.w].x} 次`)).join('')}</div></section>` : ''}
   <section class="card"><div class="sec-h"><h2>設定</h2></div><div class="set-list">
     ${row('每日目標', '首頁圓環的題數', sel('goal', [10, 20, 30, 50, 80, 100].map(v => [v, `${v} 題`])))}
@@ -841,6 +845,7 @@ function vCloze() {
     <p>照學測綜合測驗的形式，每回 2 篇短文、每篇 5 個空格，每題 1 分，一回共 10 分。選好之後對答案，每題都有詳解和選項中譯，文法題會說明句子結構和其他選項錯在哪裡。</p>
     <div class="btn-row"><button class="btn primary" type="button" data-act="czOpen" data-no="${nn}" data-pi="${nk}">${done ? `${done === CZ_N ? '複習' : '繼續'}：第 ${nn} 回第 ${nk} 篇` : '從第 1 回開始'}</button></div>
   </section>
+  ${wkModeCard('cloze')}
   ${CZ.map(r => { const dn = czSetDone(r); return `<section class="sec-block"><h2>第 ${pad2(r.no)} 回<span>${dn ? `已做 ${dn} / ${r.p.length} 篇・答對 ${czSetScore(r)} / ${dn * 5} 題` : `${r.p.length} 篇 ${r.p.length * 5} 題`}</span></h2>
     <div class="clist">${r.p.map((p, k) => { const d = S.cz.d[czKey(r.no, k + 1)];
       return `<button class="crow" type="button" data-act="czOpen" data-no="${r.no}" data-pi="${k + 1}"><span class="no">${k + 1}</span><span class="t"><b>第 ${k + 1} 篇</b><small>第 ${k * 5 + 1}–${k * 5 + 5} 題・約 ${Math.round(p.wc / 10) * 10} 字</small></span><span class="pc">${d ? `<span class="tr-done">${d[1]} / 5</span>` : ''}</span></button>`; }).join('')}</div></section>`; }).join('')}`;
@@ -934,6 +939,7 @@ function vRead() {
     <p>照學測閱讀測驗的形式，每回 3 篇文章、每篇 4 題，每題 2 分，一回共 24 分。先讀文章作答，再對答案看詳解、全文中譯和重要字詞。</p>
     <div class="btn-row"><button class="btn primary" type="button" data-act="rdOpen" data-no="${nn}" data-pi="${nk}">${done ? `${done === RD_N ? '複習' : '繼續'}：第 ${nn} 回第 ${nk} 篇` : '從第 1 回開始'}</button></div>
   </section>
+  ${wkModeCard('read')}
   ${RD.map(r => { const dn = rdSetDone(r); return `<section class="sec-block"><h2>第 ${pad2(r.no)} 回<span>${dn ? `已做 ${dn} / ${r.p.length} 篇・答對 ${rdSetScore(r)} / ${dn * 4} 題` : `${r.p.length} 篇 ${r.p.length * 4} 題`}</span></h2>
     <div class="clist">${r.p.map((p, k) => { const d = S.rd.d[rdKey(r.no, k + 1)], [t1, t2] = rdTopic(p.topic);
       return `<button class="crow" type="button" data-act="rdOpen" data-no="${r.no}" data-pi="${k + 1}"><span class="no">${k + 1}</span><span class="t"><b>${d ? esc(t1) : `第 ${k + 1} 篇`}</b><small>${d ? esc(t2 || `${p.wc} 字`) : `4 題・約 ${Math.round(p.wc / 10) * 10} 字`}</small></span><span class="pc">${d ? `<span class="tr-done">${d[1]} / 4</span>` : ''}</span></button>`; }).join('')}</div></section>`; }).join('')}`;
@@ -1023,6 +1029,7 @@ function vPick(kind) {
     <p>${c.intro}</p>
     <div class="btn-row"><button class="btn primary" type="button" data-act="pkOpen" data-kind="${kind}" data-no="${nx}">${done ? `${done === c.list.length ? '複習' : '繼續'}：第 ${nx} 回` : '從第 1 回開始'}</button></div>
   </section>
+  ${kind === 'bank' ? wkModeCard('bank') : ''}
   <section class="sec-block"><h2>全部 ${c.list.length} 回<span>${done ? `已做 ${done} 回・答對 ${dSum(st.d)} / ${done * c.n} 格` : `每回 ${c.n} 格`}</span></h2>
     <div class="clist">${c.list.map(r => { const d = st.d[r.no];
       return `<button class="crow" type="button" data-act="pkOpen" data-kind="${kind}" data-no="${r.no}"><span class="no">${pad2(r.no)}</span><span class="t"><b>${d ? esc(r.topic) : `第 ${r.no} 回`}</b><small>${c.n} 格・約 ${Math.round(r.wc / 10) * 10} 字</small></span><span class="pc">${d ? `<span class="tr-done">${d[1]} / ${c.n}</span>` : ''}</span></button>`; }).join('')}</div></section>`;
@@ -1143,6 +1150,7 @@ function vMixed() {
     <p>照學測混合題的形式，每回 1 個題組，有三種：論壇留言、兩篇短文對照、列舉資訊。題目是填充 2 格、多選 1 題、簡答 1 題。填充要從文章裡找字，並依句子改變字形。對答案之後有解析和全文中譯。</p>
     <div class="btn-row"><button class="btn primary" type="button" data-act="mxOpen" data-no="${nx}">${done ? `${done === MX.length ? '複習' : '繼續'}：第 ${nx} 回` : '從第 1 回開始'}</button></div>
   </section>
+  ${wkModeCard('mixed')}
   <section class="sec-block"><h2>全部 ${MX.length} 回<span>${done ? `已做 ${done} 回・答對 ${dSum(S.mx.d)} / ${done * 4} 題` : '每回 4 題'}</span></h2>
     <div class="clist">${MX.map(r => { const d = S.mx.d[r.no];
       return `<button class="crow" type="button" data-act="mxOpen" data-no="${r.no}"><span class="no">${pad2(r.no)}</span><span class="t"><b>${d ? esc(mxTopic(r)) : `第 ${r.no} 回`}</b><small>${MX_TYPE[r.type]}・填充、多選、簡答</small></span><span class="pc">${d ? `<span class="tr-done">${d[1]} / 4</span>` : ''}</span></button>`; }).join('')}</div></section>`;
@@ -1246,6 +1254,149 @@ function mxGo(d) {
   const i = MX.findIndex(x => x.no === MXS.no) + d;
   if (i < 0 || i >= MX.length) return;
   trFlush(); MXS = { no: MX[i].no }; renderMx(true);
+}
+
+/* ================= 題組弱點分析 ================= */
+// 不另外存資料：用已經存下來的作答（S.cz / S.bk / S.ps / S.rd / S.mx）和每題的標籤現算，所以之前做過的題組也算得進去。
+// 重做某一篇會清掉那一篇的作答，統計以最後一次對答案為準。
+const WEAK_MIN = 5;   // 一類至少作答幾題才列出正確率
+// 原始標籤很細（閱讀有四十多種），of() 把它們併成幾大類；新增標籤時 build.py 會提醒有沒有對不上的
+const WEAK = {
+  cloze: { name: CZ_MODE.name, short: '綜合', unit: '題', groups: ['字義', '片語', '文法', '連接詞與轉承語', '介系詞', '上下文'],
+    of: t => /^字義/.test(t) ? '字義' : /^片語/.test(t) ? '片語' : /^文法/.test(t) ? '文法' : /^(連接詞|轉承語)/.test(t) ? '連接詞與轉承語' : /^介系詞/.test(t) ? '介系詞' : /^上下文/.test(t) ? '上下文' : '其他' },
+  bank: { name: BK_MODE.name, short: '選填', unit: '格', groups: ['名詞', '動詞', '形容詞與副詞', '分詞與動名詞', '片語'],
+    of: t => /片語/.test(t) ? '片語' : /分詞|動名詞/.test(t) ? '分詞與動名詞' : /形容詞|副詞/.test(t) ? '形容詞與副詞' : /名詞/.test(t) ? '名詞' : /動詞/.test(t) ? '動詞' : '其他' },
+  struct: { name: PS_MODE.name, short: '篇章', unit: '格', groups: ['篇章結構'], of: () => '篇章結構' },
+  read: { name: RD_MODE.name, short: '閱讀', unit: '題', groups: ['主旨與標題', '細節', '細節（NOT 題）', '細節（原因）', '推論', '圖片題', '字義與指涉', '寫作目的與結構'],
+    of: t => { const b = t.split('（')[0];
+      return b === '主旨' || b === '標題' ? '主旨與標題'
+        : b === '細節' ? (/NOT/.test(t) ? '細節（NOT 題）' : /原因|主因|因果/.test(t) ? '細節（原因）' : '細節')
+        : b === '圖片題' ? '圖片題'
+        : /^(字義|片語)/.test(b) || b === '指涉' ? '字義與指涉'
+        : /推論$/.test(b) ? '推論'
+        : /^(寫作|段落|篇章|作者)/.test(b) ? '寫作目的與結構' : '其他'; } },
+  mixed: { name: MX_MODE.name, short: '混合', unit: '題', groups: ['填充', '多選', '簡答'], of: t => t },
+};
+const WEAK_ORDER = ['cloze', 'bank', 'struct', 'read', 'mixed'];   // 和考卷的順序一樣
+const WEAK_CARD = ['cloze', 'bank', 'read', 'mixed'];              // 篇章結構沒有分類標籤，只列進答錯清單
+// 每一題一筆：m 模式、g 分類、t 原始標籤、ok 有沒有答對、day 對答案那天、no/pi/i 第幾回、第幾篇、第幾題（混合題 i：0–1 填充、2 多選、3 簡答）
+function wkItems() {
+  const out = [];
+  const pass = (m, st, BY) => {
+    for (const k in st.d) {
+      const [no, pi] = k.split('-').map(Number), r = BY.get(no), p = r && r.p[pi - 1], a = st.a[k];
+      if (!p || !Array.isArray(a)) continue;
+      p.q.forEach((q, i) => out.push({ m, g: WEAK[m].of(q.t), t: q.t, ok: a[i] === q.a, day: st.d[k][0], no, pi, i }));
+    }
+  };
+  pass('cloze', S.cz, CZ_BY);
+  for (const k in S.bk.d) {
+    const r = BK_BY.get(+k), a = S.bk.a[k]; if (!r || !Array.isArray(a)) continue;
+    r.q.forEach((q, i) => out.push({ m: 'bank', g: WEAK.bank.of(q.pos), t: q.pos, ok: a[i] === q.a, day: S.bk.d[k][0], no: r.no, pi: 0, i }));
+  }
+  for (const k in S.ps.d) {
+    const r = PS_BY.get(+k), a = S.ps.a[k]; if (!r || !Array.isArray(a)) continue;
+    r.a.forEach((x, i) => out.push({ m: 'struct', g: '篇章結構', t: '', ok: a[i] === x, day: S.ps.d[k][0], no: r.no, pi: 0, i }));
+  }
+  pass('read', S.rd, RD_BY);
+  for (const k in S.mx.d) {
+    const r = MX_BY.get(+k), a = S.mx.a[k], d = S.mx.d[k]; if (!r || !a) continue;
+    const g = mxGrade(r, a), it = (t, ok, i) => out.push({ m: 'mixed', g: t, t, ok: !!ok, day: d[0], no: r.no, pi: 0, i });
+    it('填充', g.f[0], 0); it('填充', g.f[1], 1); it('多選', g.m, 2); it('簡答', g.s || d[2], 3);
+  }
+  return out;
+}
+// 一個模式的統計：rows 先列題數夠的（答對率低的在前），題數不夠的排後面；weak 是答對率最低、而且不到八成的那一類
+function wkStats(items, m) {
+  const by = {}; let n = 0, c = 0;
+  items.forEach(x => { if (x.m !== m) return; const r = by[x.g] || (by[x.g] = { g: x.g, n: 0, c: 0 }); r.n++; n++; if (x.ok) { r.c++; c++; } });
+  const ord = g => { const i = WEAK[m].groups.indexOf(g); return i < 0 ? 99 : i; };
+  const rows = Object.values(by).map(r => ({ g: r.g, n: r.n, c: r.c, few: r.n < WEAK_MIN, rate: r.c / r.n }))
+    .sort((a, b) => (a.few - b.few) || (a.few ? 0 : (a.rate - b.rate) || (b.n - a.n)) || (ord(a.g) - ord(b.g)));
+  return { n, c, rows, weak: rows.length && !rows[0].few && rows[0].rate < 0.8 ? rows[0] : null };
+}
+function wkRowsHTML(m, st) {
+  return st.rows.map(r => {
+    const pct = Math.round(r.rate * 100), miss = r.n - r.c;
+    const cls = r.few ? ' few' : pct < 60 ? ' lo' : pct < 80 ? ' mid' : ' hi';
+    const inner = `<span class="wk-n">${esc(r.g)}${st.weak === r ? '<em class="wk-tag">最弱</em>' : ''}</span><span class="wk-c num">${r.c} / ${r.n}</span>${r.few ? '<span class="wk-p few">題數還不夠</span>' : `<b class="wk-p num">${pct}%</b>`}<span class="wk-go" aria-hidden="true">${miss ? ICON.right : ''}</span><span class="wk-bar" aria-hidden="true"><i style="width:${r.few ? 0 : pct}%"></i></span>`;
+    return miss ? `<button class="wk-row${cls}" type="button" data-act="wkGroup" data-m="${m}" data-g="${esc(r.g)}" aria-label="${esc(r.g)}：答對 ${r.c} / ${r.n}，看答錯的 ${miss} ${WEAK[m].unit}">${inner}</button>` : `<div class="wk-row${cls}">${inner}</div>`;
+  }).join('');
+}
+// 還沒做的題組裡，含最多「最弱那一類」題目的那一篇（混合題每回的題型都一樣，不推薦）
+function wkRec(m, st) {
+  if (!st.weak) return null;
+  const g = st.weak.g; let best = null;
+  const see = (n, o) => { if (n > (best ? best.n : 0)) best = { n, ...o }; };
+  if (m === 'cloze' || m === 'read') {
+    const list = m === 'cloze' ? CZ : RD, d = m === 'cloze' ? S.cz.d : S.rd.d, act = m === 'cloze' ? 'czOpen' : 'rdOpen';
+    list.forEach(r => r.p.forEach((p, k) => { if (!d[`${r.no}-${k + 1}`]) see(p.q.filter(q => WEAK[m].of(q.t) === g).length, { id: `${r.no}-${k + 1}`, where: `第 ${r.no} 回第 ${k + 1} 篇`, unit: '篇', attrs: `data-act="${act}" data-no="${r.no}" data-pi="${k + 1}"` }); }));
+  } else if (m === 'bank') {
+    BK.forEach(r => { if (!S.bk.d[r.no]) see(r.q.filter(q => WEAK.bank.of(q.pos) === g).length, { id: `${r.no}`, where: `第 ${r.no} 回`, unit: '回', attrs: `data-act="pkOpen" data-kind="bank" data-no="${r.no}"` }); });
+  }
+  // 推薦的如果就是「繼續」按鈕要去的那一篇，不用再列一次
+  const next = m === 'cloze' ? czNext().join('-') : m === 'read' ? rdNext().join('-') : m === 'bank' ? String(pkNext('bank')) : '';
+  return best && best.id !== next ? best : null;
+}
+// 紀錄頁的卡片：四種題組模式各列一段
+function wkCard() {
+  const items = wkItems();
+  const blocks = WEAK_CARD.map(m => { const st = wkStats(items, m); return st.n ? `<div class="wk-m"><div class="wk-mh"><b>${WEAK[m].name}</b><span class="num">答對 ${st.c} / ${st.n} ${WEAK[m].unit}</span></div>${wkRowsHTML(m, st)}</div>` : ''; }).filter(Boolean);
+  if (!blocks.length) return '';
+  return `<section class="card"><div class="sec-h"><h2>題組弱點分析</h2><span class="muted">答對率低的排前面</span></div>
+    <div class="wk">${blocks.join('')}</div>
+    <p class="wk-note">點一類可以看答錯的題目。一類至少答過 ${WEAK_MIN} 題才列出正確率；重做過的題組以最後一次作答為準。</p></section>`;
+}
+// 各題組模式自己那一頁的卡片：這個模式的分類答對率，加上推薦的下一篇
+function wkModeCard(m) {
+  const st = wkStats(wkItems(), m); if (!st.n) return '';
+  const rec = wkRec(m, st);
+  return `<section class="card"><div class="sec-h"><h2>各類題目的答對率</h2><span class="muted num">答對 ${st.c} / ${st.n} ${WEAK[m].unit}</span></div>
+    <div class="wk"><div class="wk-m">${wkRowsHTML(m, st)}</div></div>
+    ${rec ? `<div class="wk-rec"><p>還沒做的題組裡，${rec.where}的「${esc(st.weak.g)}」最多（${rec.n} ${WEAK[m].unit}）。</p><button class="btn small" type="button" ${rec.attrs}>做這${rec.unit}</button></div>` : ''}
+    <p class="wk-note">點一類可以看答錯的題目。一類至少答過 ${WEAK_MIN} 題才列出正確率。</p></section>`;
+}
+// 錯題本的「題組」分頁：所有答錯的題組題目，點了回到那一篇的詳解
+let wkM = 'all', wkG = '';
+const wkWrong = () => wkItems().filter(x => !x.ok);
+const plain = h => { const d = document.createElement('div'); d.innerHTML = h; return d.textContent || ''; };
+function wkQHTML(x) {
+  const L = 'ABCDEFGHIJ'; let loc, sum;
+  if (x.m === 'cloze') { const q = CZ_BY.get(x.no).p[x.pi - 1].q[x.i], a = S.cz.a[czKey(x.no, x.pi)][x.i];
+    loc = `第 ${x.no} 回第 ${x.pi} 篇・第 ${(x.pi - 1) * 5 + x.i + 1} 題`; sum = `正解 (${L[q.a]}) ${q.o[q.a]}・你選 (${L[a]}) ${q.o[a]}`;
+  } else if (x.m === 'read') { loc = `第 ${x.no} 回第 ${x.pi} 篇・第 ${x.i + 1} 題`; sum = plain(RD_BY.get(x.no).p[x.pi - 1].q[x.i].s);
+  } else if (x.m === 'bank') { const r = BK_BY.get(x.no), a = S.bk.a[x.no][x.i], k = r.q[x.i].a;
+    loc = `第 ${x.no} 回・第 ${x.i + 1} 格`; sum = `正解 (${L[k]}) ${r.o[k]}・你填 (${L[a]}) ${r.o[a]}`;
+  } else if (x.m === 'struct') { const r = PS_BY.get(x.no), a = S.ps.a[x.no][x.i], k = r.a[x.i];
+    loc = `第 ${x.no} 回・第 ${x.i + 1} 格`; sum = `正解 (${L[k]})・你填 (${L[a]})　${r.o[k]}`;
+  } else { const r = MX_BY.get(x.no), a = S.mx.a[x.no];
+    if (x.i < 2) { loc = `第 ${x.no} 回・第 ${47 + x.i} 格`; sum = `正解 ${r.f.a[x.i].w.join(' / ')}・你填 ${mxNorm(a.f[x.i]) ? a.f[x.i] : '（沒填）'}`; }
+    else if (x.i === 2) { loc = `第 ${x.no} 回・第 49 題`; sum = `正解 ${r.m.a.split('').join('、')}・你選 ${a.m ? a.m.split('').join('、') : '（沒選）'}`; }
+    else { loc = `第 ${x.no} 回・第 50 題`; sum = `參考答案 ${r.s.a[0]}・你寫 ${mxNorm(a.s) ? a.s : '（沒寫）'}`; }
+  }
+  return `<button class="crow wk-q" type="button" data-act="wkOpen" data-m="${x.m}" data-no="${x.no}" data-pi="${x.pi}" data-i="${x.i}"><span class="no">${WEAK[x.m].short}</span><span class="t"><b>${loc}</b><small>${x.t ? `<i class="wk-t">${esc(x.t)}</i>` : ''}${esc(sum)}</small></span><span class="pc">${md(x.day)}</span></button>`;
+}
+function wkListHTML() {
+  const all = wkWrong();
+  if (!all.length) return `<p class="empty">${wkItems().length ? '目前沒有答錯的題組題目。' : '綜合測驗、文意選填、篇章結構、閱讀測驗、混合題對完答案後，答錯的題目會收在這裡，點一下就回到那一篇的詳解。'}</p>`;
+  const cnt = m => all.filter(x => x.m === m).length;
+  if (wkM !== 'all' && !cnt(wkM)) { wkM = 'all'; wkG = ''; }
+  if (wkM === 'all') wkG = '';
+  const inM = wkM === 'all' ? all : all.filter(x => x.m === wkM);
+  const list = (wkG ? inM.filter(x => x.g === wkG) : inM).sort((a, b) => (b.day - a.day) || (WEAK_ORDER.indexOf(a.m) - WEAK_ORDER.indexOf(b.m)) || (a.no - b.no) || (a.pi - b.pi) || (a.i - b.i));
+  const chips = [['all', '全部', all.length], ...WEAK_ORDER.filter(cnt).map(m => [m, WEAK[m].name, cnt(m)])];
+  return `<div class="chips">${chips.map(([k, n, c]) => `<button class="chip" type="button" data-act="wkMode" data-v="${k}" aria-pressed="${wkM === k}">${n} ${c}</button>`).join('')}</div>
+  ${wkG ? `<div class="wk-f"><span>只看「${esc(wkG)}」${list.length ? `・${list.length} ${WEAK[wkM].unit}` : ''}</span><button class="btn small" type="button" data-act="wkClearG">看全部類別</button></div>` : ''}
+  ${list.length ? `<div class="clist">${list.map(wkQHTML).join('')}</div><p class="wk-note">點一題回到那一篇的詳解。重做那一篇並答對，題目就會從這裡消失。</p>` : '<p class="empty">這一類目前沒有答錯的題目。</p>'}`;
+}
+function wkOpen(m, no, pi, i) {
+  let id;
+  if (m === 'cloze') { openCloze(no, pi); id = 'czq' + i; }
+  else if (m === 'read') { openRead(no, pi); id = 'rdq' + i; }
+  else if (m === 'bank' || m === 'struct') { openPick(m, no); id = 'pkq' + i; }
+  else if (m === 'mixed') { openMixed(no); id = 'mxq' + (i < 2 ? 0 : i - 1); }
+  else return;
+  setTimeout(() => { const el = $('#' + id); if (el) el.scrollIntoView({ block: 'start' }); }, 40);
 }
 
 const VIEWS = { home: vHome, practice: vPractice, words: vWords, wrong: vWrong, me: vMe, trans: vTrans, cloze: vCloze, read: vRead,
@@ -1575,6 +1726,7 @@ const busy = () => (OV === 'quiz' && !!Q && Q.i < Q.qs.length) || (OV === 'mock'
 const ACT = {
   go: el => go(el.dataset.to),
   goFav: () => { listTab = 'fav'; go('wrong'); },
+  goWrong: () => { listTab = 'wrong'; go('wrong'); },   // 首頁的「錯題本」數的是單字，所以固定開單字那一頁（不是上次停在的分頁）
   review: () => {
     const t = today();
     const due = W.filter(w => isDue(w, t)).sort((a, b) => (isWrong(b) - isWrong(a)) || (S.w[a.w].d - S.w[b.w].d) || (S.w[a.w].b - S.w[b.w].b));
@@ -1625,6 +1777,10 @@ const ACT = {
   mxRedo: () => mxRedo(),
   mxGo: el => mxGo(+el.dataset.d),
   mxList: () => { closeOverlay(); go('mixed'); },
+  wkGroup: el => { listTab = 'sets'; wkM = el.dataset.m; wkG = el.dataset.g; go('wrong'); },
+  wkMode: el => { wkM = el.dataset.v; wkG = ''; render(); },
+  wkClearG: () => { wkG = ''; render(); },
+  wkOpen: el => wkOpen(el.dataset.m, +el.dataset.no, +el.dataset.pi, +el.dataset.i),
   resume: () => { if (!S.sess) return; Q = S.sess; openOverlay('quiz'); if (Q.a) nextQ(); else renderQ(); },
   dropResume: () => { S.sess = null; save(); render(); },
   setMode: el => { S.setup.mode = el.dataset.m; save(); render(); },
@@ -1790,5 +1946,6 @@ if (ENV !== 'artifact' && 'serviceWorker' in navigator && (location.protocol ===
   window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
 }
 // 給自動測試用
-window.__app = { get S() { return S; }, normalize, render, go, openWord, W, ORIG, PAST, PAST_BY, CARDS, ACT, makeQ, pickDistractors, record, rangeWords, startQuiz, startMock, pick, submitTyping, nextQ, rate, get Q() { return Q; }, get M() { return M; }, get F() { return F; }, lvl, levelCounts, searchWords, mixType, clash, TR, openTrans, get TRS() { return TRS; }, CZ, RD, BK, PS, MX, SETS, MODE_NO, openPick, openMixed, mxGrade, mxNorm, pkSents, get PKS() { return PKS; }, get MXS() { return MXS; }, get OV() { return OV; } };
+window.__app = { get S() { return S; }, normalize, render, go, openWord, W, ORIG, PAST, PAST_BY, CARDS, ACT, makeQ, pickDistractors, record, rangeWords, startQuiz, startMock, pick, submitTyping, nextQ, rate, get Q() { return Q; }, get M() { return M; }, get F() { return F; }, lvl, levelCounts, searchWords, mixType, clash, TR, openTrans, get TRS() { return TRS; }, CZ, RD, BK, PS, MX, SETS, MODE_NO, openPick, openMixed, mxGrade, mxNorm, pkSents, get PKS() { return PKS; }, get MXS() { return MXS; }, get OV() { return OV; },
+  wk: { WEAK, WEAK_MIN, items: wkItems, stats: wkStats, rec: wkRec, wrong: wkWrong, open: wkOpen, get m() { return wkM; }, get g() { return wkG; } } };
 })();
