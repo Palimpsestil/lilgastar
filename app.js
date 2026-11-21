@@ -127,7 +127,7 @@ const DEFAULTS = { goal: 30, newN: 10, grad: 2, sound: false, autoSay: false, ac
   mixTyping: false, zhFirst: false, theme: 'auto', fs: 'm', exam: '2027-01-22', reviewN: 30 };
 const SETUP0 = { mode: 'e2c', cards: CARDS.map(c => c.no), levels: [3, 4, 5], filter: 'all', count: 20, order: 'random',
   mockN: 10, mockSrc: 'mix', mockTimed: true };
-function fresh() { return { app: 'gsat1800', v: 1, w: {}, days: {}, modes: {}, fav: {}, set: { ...DEFAULTS }, setup: { ...SETUP0, cards: SETUP0.cards.slice() }, sess: null, tr: { d: {}, a: {} }, cz: { d: {}, a: {} }, rd: { d: {}, a: {} }, bk: { d: {}, a: {} }, ps: { d: {}, a: {} }, mx: { d: {}, a: {} }, since: dkey() }; }
+function fresh() { return { app: 'gsat1800', v: 1, w: {}, days: {}, modes: {}, fav: {}, set: { ...DEFAULTS }, setup: { ...SETUP0, cards: SETUP0.cards.slice() }, sess: null, tr: { d: {}, a: {} }, cz: { d: {}, a: {} }, rd: { d: {}, a: {} }, bk: { d: {}, a: {} }, ps: { d: {}, a: {} }, mx: { d: {}, a: {} }, bak: { d: 0, s: 0 }, since: dkey() }; }
 const HEADS = new Set(W.map(w => w.w));
 const TYPE_KEYS = ['e2c', 'c2e', 'cloze', 'past', 'listen', 'coll', 'spell'];
 const MODE_KEYS = ['e2c', 'c2e', 'cloze', 'mix', 'past', 'mock', 'cards', 'coll', 'spell', 'listen'];
@@ -237,6 +237,8 @@ function normalize(o) {
   if (typeof su.mockTimed === 'boolean') s.setup.mockTimed = su.mockTimed;
   s.sess = cleanSess(o.sess);
   if (typeof o.since === 'string' && dnum(o.since) != null) s.since = o.since;
+  // 備份提醒：d = 上次備份那天，s = 按「之後再說」那天（都是天數；沒有就是 0，未來的日期不算）
+  if (isObj(o.bak)) for (const k of ['d', 's']) { const v = Math.floor(num(o.bak[k])); if (v > 0 && v <= today()) s.bak[k] = v; }
   return s;
 }
 let storeOK = true;
@@ -246,6 +248,21 @@ function save() {
   try { localStorage.setItem(KEY, JSON.stringify(S)); storeOK = true; }
   catch (e) { if (storeOK) toast('這個瀏覽器無法儲存進度（可能是無痕模式）'); storeOK = false; }
 }
+
+/* ================= 備份提醒 ================= */
+// 紀錄只存在這個瀏覽器，所以累積了一些天數、又一陣子沒備份時，首頁會出現一張小卡。
+// S.bak.d = 上次備份（下載備份檔或複製備份碼）那天，S.bak.s = 按「之後再說」那天
+const BAK_DAYS = 7, BAK_GAP = 14;   // 有幾天的紀錄才提醒；隔幾天沒備份（或按了之後再說）再提醒一次
+function bakDue() {
+  if (!storeOK) return null;   // 存不進去的瀏覽器（例如無痕模式）首頁已經另外說明
+  const t = today(), b = S.bak;
+  const ks = Object.keys(S.days).filter(k => { const r = S.days[k]; return !!(r.q || r.f || r.t); });
+  if (ks.length < BAK_DAYS) return null;
+  if (b.d && (t - b.d < BAK_GAP || !ks.some(k => dnum(k) > b.d))) return null;   // 剛備份過，或備份之後沒有再練習
+  if (b.s && t - b.s < BAK_GAP) return null;
+  return { days: ks.length, ago: b.d ? t - b.d : 0 };
+}
+function bakMark() { S.bak.d = today(); S.bak.s = 0; save(); }
 
 /* ================= 熟練度與間隔複習 ================= */
 // 盒子 b：0 未學、1–2 學習中、3–4 熟悉、5–6 精熟；答對且當天第一次升級才升一盒，間隔 1/2/4/7/15/30 天
@@ -521,6 +538,8 @@ function vHome() {
   const exam = dnum(S.set.exam), left = exam == null ? null : exam - t;
   const L = levelCounts(W), stk = streak();
   const ss = S.sess;
+  const bk = bakDue(), canFile = ENV !== 'artifact';
+  const bakCard = bk ? `<section class="bak" aria-label="備份提醒"><div><b>備份一下紀錄</b><p>${bk.ago ? `距離上次備份已經 ${bk.ago} 天。` : `已經累積 ${bk.days} 天的練習紀錄，還沒有備份過。`}紀錄只存在這個瀏覽器，清除瀏覽資料或換手機就會不見。</p></div><div class="bak-btns"><button class="btn small ghost" type="button" data-act="bakLater">之後再說</button><button class="btn small primary" type="button" data-act="${canFile ? 'exportFile' : 'exportCode'}">${canFile ? '下載備份檔' : '複製備份碼'}</button></div></section>` : '';
   const resume = ss && ss.i < ss.qs.length ? `<div class="resume"><p>上次的「${esc(ss.title)}」做到第 ${ss.i + 1} / ${ss.qs.length} 題</p><div class="btn-row" style="flex:none"><button class="btn small ghost" type="button" data-act="dropResume">不用了</button><button class="btn small primary" type="button" data-act="resume">繼續</button></div></div>` : '';
   return `
   <header class="top">
@@ -540,6 +559,7 @@ function vHome() {
     <button class="big ${due.length ? 'primary' : ''}" type="button" data-act="review"><b>今日複習</b><span>${due.length ? `${due.length} 個字到期，這輪複習 ${Math.min(due.length, S.set.reviewN)} 個` : '目前沒有到期的字'}</span></button>
     <button class="big ${due.length ? '' : 'primary'}" type="button" data-act="learn"><b>學新字</b><span>${fresh0.length ? `從第 ${fresh0[0].g} 組接著學 ${Math.min(S.set.newN, fresh0.length)} 個` : '1800 字都學過了'}</span></button>
   </section>
+  ${bakCard}
   <section class="card">
     <div class="sec-h"><h2>${MAIN_N}種練習模式</h2><span class="muted num">${esc(rangeLabel(S.setup).split('：')[0])}・每次 ${S.setup.count} 題</span></div>
     <div class="modes3 home">${MAIN_MODES.map((id, k) => `<button class="mode main" type="button" data-act="quickMode" data-m="${id}"><span class="mnum">${k + 1}</span><b>${TYPES[id].name}</b><span>${TYPES[id].desc}</span></button>`).join('')}${SETS.map(x => `<button class="mode main" type="button" data-act="${x.next}"><span class="mnum">${MODE_NO[x.id]}</span><b>${x.m.name}</b><span>${x.m.desc}</span></button>`).join('')}</div>
@@ -732,6 +752,7 @@ function vMe() {
   </div></section>
   <section class="card"><div class="sec-h"><h2>備份與換裝置</h2></div>
     <p class="muted" style="font-size:.85rem;margin-bottom:12px">紀錄只存在這個瀏覽器。換手機、換瀏覽器或清除瀏覽資料前，先備份；到新裝置打開網站後匯入。</p>
+    <p class="bak-last">上次備份：${S.bak.d ? `${md(S.bak.d)}（${t - S.bak.d > 0 ? `${t - S.bak.d} 天前` : '今天'}）` : '還沒有備份過'}</p>
     <div class="btn-row">${ENV !== 'artifact' ? '<button class="btn" type="button" data-act="exportFile">下載備份檔</button>' : ''}<button class="btn" type="button" data-act="exportCode">複製備份碼</button></div>
     <div class="btn-row" style="margin-top:10px"><label class="btn" for="importFile">匯入備份檔<input type="file" id="importFile" accept=".json,.txt,application/json,text/plain" class="sr"></label><button class="btn" type="button" data-act="importCode">貼上備份碼</button></div>
     <div class="btn-row" style="margin-top:10px"><button class="btn danger" type="button" data-act="reset">清除所有紀錄</button></div>
@@ -1709,7 +1730,8 @@ async function importData(text) {
   if (!d) { toast('這不是學測 1800 的備份'); return; }
   const n = Object.keys(d.w || {}).length;
   if (!await ask(`要用這份備份（${n} 個字的紀錄）取代目前的進度嗎？`, '取代')) return;
-  S = normalize(d); save(); applyLook(); TTS.pick();
+  S = normalize(d); S.bak = { d: today(), s: 0 };   // 剛匯入的內容和手上那份備份一樣，等於今天備份過
+  save(); applyLook(); TTS.pick();
   if (!$('#sheet').hidden) closeSheet();
   render(); toast('已匯入備份');
 }
@@ -1874,8 +1896,10 @@ const ACT = {
     const name = listTab === 'fav' ? '收藏' : listTab === 'grad' ? '已畢業' : '錯題本';
     copyText(`學測英文復興計劃｜${name}（${ws.length} 字）\n` + ws.map(w => { const s = S.w[w.w]; return `${w.w}（${w.p}）${w.zh}${s && s.x ? `｜錯 ${s.x} 次` : ''}`; }).join('\n'), '已複製清單');
   },
-  exportFile: () => download(`學測1800備份_${dkey()}.json`, backupText()),
-  exportCode: () => copyText(backupText(), '已複製備份碼，請貼到記事本保存'),
+  // 備份：先記下今天備份過（備份檔裡也會帶著這個日期），首頁的提醒和設定頁的「上次備份」跟著更新
+  exportFile: () => { bakMark(); download(`學測1800備份_${dkey()}.json`, backupText()); if (!OV) render(); },
+  exportCode: () => { bakMark(); copyText(backupText(), '已複製備份碼，請貼到記事本保存'); if (!OV) render(); },
+  bakLater: () => { S.bak.s = today(); save(); render(); },
   importCode: () => openSheet(`<h2 id="sheetTitle">貼上備份碼</h2><p class="muted">把之前複製的備份碼整段貼進來。</p><textarea class="copybox" id="pasteBox" placeholder='{"app":"gsat1800",...}'></textarea><div class="btn-row"><button class="btn primary" type="button" data-act="doImport">匯入</button></div>`),
   doImport: () => importData($('#pasteBox').value),
   reset: async () => {
@@ -1947,5 +1971,6 @@ if (ENV !== 'artifact' && 'serviceWorker' in navigator && (location.protocol ===
 }
 // 給自動測試用
 window.__app = { get S() { return S; }, normalize, render, go, openWord, W, ORIG, PAST, PAST_BY, CARDS, ACT, makeQ, pickDistractors, record, rangeWords, startQuiz, startMock, pick, submitTyping, nextQ, rate, get Q() { return Q; }, get M() { return M; }, get F() { return F; }, lvl, levelCounts, searchWords, mixType, clash, TR, openTrans, get TRS() { return TRS; }, CZ, RD, BK, PS, MX, SETS, MODE_NO, openPick, openMixed, mxGrade, mxNorm, pkSents, get PKS() { return PKS; }, get MXS() { return MXS; }, get OV() { return OV; },
+  bakDue, BAK_DAYS, BAK_GAP,
   wk: { WEAK, WEAK_MIN, items: wkItems, stats: wkStats, rec: wkRec, wrong: wkWrong, open: wkOpen, get m() { return wkM; }, get g() { return wkG; } } };
 })();

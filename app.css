@@ -607,3 +607,10 @@ button.cz-b:hover{border-color:var(--blue)}
 .wk-t{font-style:normal;font-weight:600;color:var(--plum);margin-right:6px}
 .wk-q .pc{min-width:0}
 .clist + .wk-note{margin-top:-6px}
+
+/* 備份提醒：首頁的小卡，和設定頁的「上次備份」 */
+.bak{display:flex;flex-direction:column;gap:10px;background:var(--blue-soft2);border:1px solid var(--blue-soft);border-radius:var(--r);padding:13px 14px}
+.bak b{display:block;font-size:.95rem;color:var(--blue-ink)}
+.bak p{font-size:.86rem;line-height:1.6;margin-top:2px}
+.bak-btns{display:flex;justify-content:flex-end;gap:8px}
+.bak-last{font-size:.85rem;margin-bottom:12px;font-variant-numeric:tabular-nums}
